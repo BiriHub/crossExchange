@@ -68,11 +68,22 @@ public class CrossClientMain {
         String password = console.readLine();
 
         String request = gson.toJson(new RegistrationRequest(username, password));
-        sendRequest(request);
         output.print(request);
         handleSessionResponse();
     }
 
+    // Update user credentials
+    private void updateCredentials(BufferedReader console) throws IOException {
+        System.out.print("Username: ");
+        String username = console.readLine();
+        System.out.print("Password attuale: ");
+        String currentPassword = console.readLine();
+        System.out.print("Nuova password: ");
+        String newPassword = console.readLine(); 
+        String request = gson.toJson("{ \"username\": \"" + username + "\", \"currentPassword\": \"" + currentPassword + "\", \"newPassword\": \"" + newPassword + "\" }");
+        output.println(request);
+        handleSessionResponse();
+    }
     // User login
     private void login(BufferedReader console) throws IOException {
         System.out.print("Username: ");
@@ -83,7 +94,6 @@ public class CrossClientMain {
         String request = gson.toJson(new LoginRequest(username, password));
         output.println(request);
         handleSessionResponse();
-
     }
 
     // Logout

@@ -60,5 +60,54 @@ public class CrossClientMain {
         }
     }
 
+    // User registration
+    private void register(BufferedReader console) throws IOException {
+        System.out.print("Username: ");
+        String username = console.readLine();
+        System.out.print("Password: ");
+        String password = console.readLine();
 
-}
+        String request = gson.toJson(new RegistrationRequest(username, password));
+        sendRequest(request);
+        output.print(request);
+        handleSessionResponse();
+    }
+
+    // User login
+    private void login(BufferedReader console) throws IOException {
+        System.out.print("Username: ");
+        String username = console.readLine();
+        System.out.print("Password: ");
+        String password = console.readLine();
+
+        String request = gson.toJson(new LoginRequest(username, password));
+        output.println(request);
+        handleSessionResponse();
+
+    }
+
+    // Logout
+    private void logout(BufferedReader console) throws IOException {
+        output.println("{}");
+        handleSessionResponse();
+    }
+
+    // Handle server response about user activity
+    private void handleSessionResponse() throws IOException {
+        UserSessionResponse response = gson.fromJson(input.readLine(),
+                UserSessionResponse.class);
+
+        System.out.println(response.toString()); // print the server response
+    }
+
+    // Disconnect from the server
+    private void disconnect() {
+        try {
+            if (socket != null)
+                socket.close();
+        } catch (IOException e) {
+            System.err.println("Disconnection error: " + e.getMessage());
+        }
+    }
+
+  }

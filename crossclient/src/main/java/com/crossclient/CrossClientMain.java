@@ -60,6 +60,16 @@ public class CrossClientMain {
         }
     }
 
+    // Disconnect from the server
+    private void disconnect() {
+        try {
+            if (socket != null)
+                socket.close();
+        } catch (IOException e) {
+            System.err.println("Disconnection error: " + e.getMessage());
+        }
+    }
+
     // User registration
     private void register(BufferedReader console) throws IOException {
         System.out.print("Username: ");
@@ -79,11 +89,13 @@ public class CrossClientMain {
         System.out.print("Password attuale: ");
         String currentPassword = console.readLine();
         System.out.print("Nuova password: ");
-        String newPassword = console.readLine(); 
-        String request = gson.toJson("{ \"username\": \"" + username + "\", \"currentPassword\": \"" + currentPassword + "\", \"newPassword\": \"" + newPassword + "\" }");
+        String newPassword = console.readLine();
+        String request = gson.toJson("{ \"username\": \"" + username + "\", \"currentPassword\": \"" + currentPassword
+                + "\", \"newPassword\": \"" + newPassword + "\" }");
         output.println(request);
         handleSessionResponse();
     }
+
     // User login
     private void login(BufferedReader console) throws IOException {
         System.out.print("Username: ");
@@ -110,14 +122,4 @@ public class CrossClientMain {
         System.out.println(response.toString()); // print the server response
     }
 
-    // Disconnect from the server
-    private void disconnect() {
-        try {
-            if (socket != null)
-                socket.close();
-        } catch (IOException e) {
-            System.err.println("Disconnection error: " + e.getMessage());
-        }
-    }
-
-  }
+}

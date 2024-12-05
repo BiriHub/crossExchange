@@ -8,6 +8,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.crossserver.models.*;
+import com.crossserver.models.Session.SessionManager;
 import com.google.gson.*;
 
 import java.net.ServerSocket;
@@ -28,12 +29,14 @@ public class CrossServerMain {
     private long max_sessionTime; // Maximum user session time
 
     private final ExecutorService threadPool;
+    private final SessionManager sessionManager;
     private final Gson gson = new Gson();
 
     public CrossServerMain() {
         // Load the default configuration and connect to the server
         loadConfiguration();
         usersDB = new ConcurrentHashMap<>();
+        sessionManager = new SessionManager(max_sessionTime);
         threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
     }
 
@@ -118,7 +121,11 @@ public class CrossServerMain {
     }
 
     public String logout(JsonObject request){
-        
+        String username = request.get("username").getAsString();
+        if (!sessionManager.isUserLoggedIn(username)) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "User is not logged in"));
+        }
+        return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
     // Gestione Limit Order
     public String handleLimitOrder(JsonObject request) {

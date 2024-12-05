@@ -68,7 +68,7 @@ public class CrossServerMain {
     }
 
     // Registrazione utente
-    private String register(JsonObject request) {
+    public String register(JsonObject request) {
         String username = request.get("username").getAsString();
         String password = request.get("password").getAsString();
 
@@ -85,7 +85,7 @@ public class CrossServerMain {
     }
 
     // Login utente
-    private String login(JsonObject request) {
+    public String login(JsonObject request) {
         String username = request.get("username").getAsString();
         String old_password = request.get("password").getAsString();
 
@@ -98,7 +98,7 @@ public class CrossServerMain {
     }
 
     // Aggiornamento credenziali
-    private String updateCredentials(JsonObject request) {
+    public String updateCredentials(JsonObject request) {
         String username = request.get("username").getAsString();
         String oldPassword = request.get("password").getAsString();
         String newPassword = request.get("new_password").getAsString();
@@ -117,26 +117,29 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response", 100, "errorMessage", ""));
     }
 
+    public String logout(JsonObject request){
+        
+    }
     // Gestione Limit Order
-    private String handleLimitOrder(JsonObject request) {
+    public String handleLimitOrder(JsonObject request) {
 
     }
 
     // Gestione Market Order (placeholder)
-    private String handleMarketOrder(JsonObject request) {
+    public String handleMarketOrder(JsonObject request) {
     }
 
     // Gestione Stop Order (placeholder)
-    private String handleStopOrder(JsonObject request) {
+    public String handleStopOrder(JsonObject request) {
     }
 
     // Cancellazione ordini (placeholder)
-    private String cancelOrder(JsonObject request) {
+    public String cancelOrder(JsonObject request) {
 
     }
 
     // Recupero storico prezzi (placeholder)
-    private String getPriceHistory(JsonObject request) {
+    public String getPriceHistory(JsonObject request) {
 
     }
 

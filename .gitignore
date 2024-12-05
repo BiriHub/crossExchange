@@ -3,3 +3,5 @@
 *.class
 
 crossclient/.idea/
+
+crossserver/src/main/java/com/crossserver/CROSSServer.java

@@ -4,11 +4,12 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class SessionManager {
-    private final Map<String, Long> sessionMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> sessionMap;
     private final long sessionTimeout; // Timeout in millisecondi
 
     public SessionManager(long timeoutInMillis) {
         this.sessionTimeout = timeoutInMillis;
+        sessionMap = new ConcurrentHashMap<>();
         startSessionMonitor();
     }
 

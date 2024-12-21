@@ -30,13 +30,14 @@ public class CrossServerMain {
 
     private final ExecutorService threadPool;
     private final SessionManager sessionManager;
-    private final Gson gson = new Gson();
+    private final Gson gson;
 
     public CrossServerMain() {
         // Load the default configuration and connect to the server
         loadConfiguration();
         usersDB = new ConcurrentHashMap<>();
         sessionManager = new SessionManager(max_sessionTime);
+        gson = new Gson();
         threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
     }
 
@@ -120,13 +121,17 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response", 100, "errorMessage", ""));
     }
 
-    public String logout(JsonObject request){
+    public String logout(JsonObject request){ // TODO: da finire di completare , vedi se è il caso o meno di aggiungere parametri alla richiesta json tipo il nome dell'utente
         String username = request.get("username").getAsString();
+
         if (!sessionManager.isUserLoggedIn(username)) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "User is not logged in"));
         }
-        return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
+        return gson.toJson(Map.of("response", 100, "errorMessage", "You are now logged out"));
     }
+    // TODO : previous methods need to be checked
+
+
     // Gestione Limit Order
     public String handleLimitOrder(JsonObject request) {
 

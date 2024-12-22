@@ -3,7 +3,6 @@ package com.crossserver;
 import java.io.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -11,6 +10,8 @@ import com.crossserver.models.*;
 import com.crossserver.models.Session.SessionManager;
 import com.google.gson.*;
 
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.Timestamp;
@@ -49,10 +50,12 @@ public class CrossServerMain {
         try (InputStream configFileStream = CrossServerMain.class.getResourceAsStream(CONFIG_FILE)) {
             Properties config = new Properties();
             config.load(configFileStream);
-            serverPort = Integer.parseInt(config.getProperty("port"));
-            max_sessionTime = Long.parseLong(config.getProperty("sessionTime"));
-            serverSocket = new ServerSocket(serverPort);
+            serverPort = Integer.parseInt(config.getProperty("port")); // extract the port from the configuration file
+            max_sessionTime = Long.parseLong(config.getProperty("sessionTime")); // extract the maximum session time from the configuration file
+            String serverAddress = config.getProperty("address"); // extract the server address from the configuration file
+            serverSocket = new ServerSocket(serverPort,0,InetAddress.getByName(serverAddress) ); // 
 
+            
         } catch (NullPointerException e) {
             System.err.println("Configuration file has not been found :" + CONFIG_FILE);
             System.exit(1);
@@ -64,7 +67,7 @@ public class CrossServerMain {
 
     // start the server
     public void start() throws IOException {
-        System.out.println("[!] Server started on port " + serverPort + "address: " + serverSocket.getInetAddress());
+        System.out.println("[!] Server started on port " + serverPort + ". Address: " + serverSocket.getInetAddress());
         while (true) {
             Socket clientSocket = serverSocket.accept();
             threadPool.execute(new UserHandler(clientSocket, this));
@@ -77,15 +80,15 @@ public class CrossServerMain {
         String password = request.get("password").getAsString();
 
         if (username.isEmpty() || password.isEmpty()) {
-            return gson.toJson("{\"response\":103, \"errorMessage\": \"User parameter not found \"}");
+            return gson.toJson(Map.of( "response", 103, "errorMessage", "User parameter not found"));
         }
 
         if (usersDB.containsKey(username)) {
-            return gson.toJson("{\"response\":102, \"errorMessage\": \"Username not available \"}");
+            return gson.toJson(Map.of("response", 102, "errorMessage", "Username not available"));
         }
         usersDB.put(username, password);
 
-        return gson.toJson("{\"response\":100, \"errorMessage\": \"OK \"}");
+        return gson.toJson(Map.of("response",100,"errorMessage","OK"));
     }
 
     // Login utente
@@ -106,19 +109,22 @@ public class CrossServerMain {
         String username = request.get("username").getAsString();
         String oldPassword = request.get("password").getAsString();
         String newPassword = request.get("new_password").getAsString();
-
-        User user = usersDB.get(username);
-        if (user == null || !user.getPassword().equals(oldPassword)) {
-            return gson.toJson(Map.of("response", 102, "errorMessage", "Credenziali errate"));
-        }
-
+        
         if (newPassword.equals(oldPassword)) {
             return gson.toJson(
                     Map.of("response", 103, "errorMessage", "La nuova password non può essere uguale alla vecchia"));
         }
 
-        user.setPassword(newPassword);
-        return gson.toJson(Map.of("response", 100, "errorMessage", ""));
+        String user_password = usersDB.get(username);
+
+        if (user_password == null || !user_password.equals(oldPassword)) {
+            return gson.toJson(Map.of("response", 102, "errorMessage", "Credenziali errate"));
+        }
+
+
+        usersDB.put(username, newPassword); // update the user's password
+
+        return gson.toJson(Map.of("response", 100, "errorMessage", "Password updated successfully"));
     }
 
     public String logout(JsonObject request){ // TODO: da finire di completare , vedi se è il caso o meno di aggiungere parametri alla richiesta json tipo il nome dell'utente
@@ -132,31 +138,28 @@ public class CrossServerMain {
     // TODO : previous methods need to be checked
 
 
-    // Gestione Limit Order
-    public String handleLimitOrder(JsonObject request) {
+    // // Gestione Limit Order
+    // public String handleLimitOrder(JsonObject request) {
 
-    }
+    // }
 
-    // Gestione Market Order (placeholder)
-    public String handleMarketOrder(JsonObject request) {
-    }
+    // // Gestione Market Order (placeholder)
+    // public String handleMarketOrder(JsonObject request) {
+    // }
 
-    // Gestione Stop Order (placeholder)
-    public String handleStopOrder(JsonObject request) {
-    }
+    // // Gestione Stop Order (placeholder)
+    // public String handleStopOrder(JsonObject request) {
+    // }
 
-    // Cancellazione ordini (placeholder)
-    public String cancelOrder(JsonObject request) {
+    // // Cancellazione ordini (placeholder)
+    // public String cancelOrder(JsonObject request) {
 
-    }
+    // }
 
-    // Recupero storico prezzi (placeholder)
-    public String getPriceHistory(JsonObject request) {
+    // // Recupero storico prezzi (placeholder)
+    // public String getPriceHistory(JsonObject request) {
 
-    }
-
-    }
-
+    // }
     public static void main(String[] args) {
         try {
             CrossServerMain server = new CrossServerMain();

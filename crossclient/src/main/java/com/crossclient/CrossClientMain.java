@@ -7,6 +7,8 @@ import com.crossclient.models.requestTypes.LoginRequest;
 import com.crossclient.models.requestTypes.RegistrationRequest;
 import com.crossclient.models.responseTypes.UserSessionResponse;
 import com.google.gson.*;
+
+import java.util.Map;
 import java.util.Properties;
 
 public class CrossClientMain {
@@ -36,8 +38,8 @@ public class CrossClientMain {
         try (InputStream configFileStream = CrossClientMain.class.getResourceAsStream(CONFIG_FILE)) {
             Properties config = new Properties();
             config.load(configFileStream);
-            serverHost = config.getProperty("server.host");
-            serverPort = Integer.parseInt(config.getProperty("server.port"));
+            serverHost = config.getProperty("server");
+            serverPort = Integer.parseInt(config.getProperty("port"));
 
         } catch (NullPointerException e) {
             System.err.println("Configuration file has not been found :" + CONFIG_FILE);
@@ -77,8 +79,9 @@ public class CrossClientMain {
         System.out.print("Password: ");
         String password = console.readLine();
 
-        String request = gson.toJson(new RegistrationRequest(username, password));
-        output.print(request);
+        String request = gson.toJson(Map.of("operation","register","username", username, "password", password));
+        System.out.println("Richista creata: "+ request);
+        output.println(request);
         handleSessionResponse();
     }
 
@@ -114,12 +117,64 @@ public class CrossClientMain {
         handleSessionResponse();
     }
 
-    // Handle server response about user activity
-    private void handleSessionResponse() throws IOException {
-        UserSessionResponse response = gson.fromJson(input.readLine(),
-                UserSessionResponse.class);
+    // // Handle server response about user activity
+    // private void handleSessionResponse() throws IOException {
+    //     UserSessionResponse response = gson.fromJson(input.readLine(),UserSessionResponse.class);
 
-        System.out.println(response.toString()); // print the server response
+    //     System.out.println(response.toString()); // print the server response
+    // }
+        // Handle server response about user activity
+        private void handleSessionResponse() throws IOException {
+            String jsonResponse = input.readLine();
+            System.out.println("Risposta ricevuta: " + jsonResponse);
+            UserSessionResponse response = gson.fromJson(jsonResponse, UserSessionResponse.class);
+    
+            System.out.println(response.toString()); // print the server response
+        }
+
+    // Menu principale
+    public void start() {
+        try (BufferedReader console = new BufferedReader(new InputStreamReader(System.in))) {
+            String command;
+            while (true) {
+                System.out.println("\n--- Menu CROSS ---");
+                System.out.println("1. Register");
+                System.out.println("2. Login");
+                System.out.println("3. Logout");
+                System.out.println("0. Exit");
+                System.out.print("Inserisci comando: ");
+                command = console.readLine();
+
+                if (command.equals("0"))
+                    break;
+                handleCommand(command, console);
+            }
+        } catch (IOException e) {
+            System.err.println("Errore di input/output: " + e.getMessage());
+        } finally {
+            disconnect();
+        }
     }
+
+    // Gestione dei comandi
+    private void handleCommand(String command, BufferedReader console) throws IOException {
+        switch (command) {
+            case "1" -> register(console);
+            case "2" -> login(console);
+            case "3" -> logout(console);
+            default -> System.out.println("Comando non riconosciuto.");
+        }
+    }
+
+        // Main
+        public static void main(String[] args) {
+            try {
+                CrossClientMain client = new CrossClientMain();
+                client.connectToServer();
+                client.start();
+            } catch (IOException e) {
+                System.err.println("Errore nell'avvio del client: " + e.getMessage());
+            }
+        }
 
 }

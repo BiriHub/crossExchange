@@ -31,13 +31,14 @@ public class UserHandler implements Runnable {
                 PrintWriter output = new PrintWriter(socket.getOutputStream(), true)) {
 
             String request;
-            while ((request = input.readLine()) != null) {
+            while (!Thread.currentThread().isInterrupted() && (request = input.readLine()) != null) {
+                System.out.println("Richiesta ricevuta: " + request);
                 JsonObject jsonRequest = gson.fromJson(request, JsonObject.class);
                 String response = handleRequest(jsonRequest);
                 output.println(response);
             }
         } catch (IOException e) {
-            System.err.println("Errore con il client: " + e.getMessage());
+            System.err.println("Client error : " + e.getMessage());
         } finally {
             try {
                 socket.close();

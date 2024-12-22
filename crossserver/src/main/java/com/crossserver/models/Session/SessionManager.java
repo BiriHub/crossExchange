@@ -1,4 +1,4 @@
-package com.crossserver.models;
+package com.crossserver.models.Session;
 
 import java.util.*;
 import java.util.concurrent.*;

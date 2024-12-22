@@ -89,12 +89,11 @@ public class CrossClientMain {
     private void updateCredentials(BufferedReader console) throws IOException {
         System.out.print("Username: ");
         String username = console.readLine();
-        System.out.print("Password attuale: ");
+        System.out.print("Current password: ");
         String currentPassword = console.readLine();
-        System.out.print("Nuova password: ");
+        System.out.print("New password: ");
         String newPassword = console.readLine();
-        String request = gson.toJson("{ \"username\": \"" + username + "\", \"currentPassword\": \"" + currentPassword
-                + "\", \"newPassword\": \"" + newPassword + "\" }");
+        String request = gson.toJson(Map.of("operation","updateCredentials","username", username, "old_password", currentPassword, "new-password", newPassword));
         output.println(request);
         handleSessionResponse();
     }
@@ -106,14 +105,16 @@ public class CrossClientMain {
         System.out.print("Password: ");
         String password = console.readLine();
 
-        String request = gson.toJson(new LoginRequest(username, password));
+        String request = gson.toJson(Map.of("operation","login","username", username, "password", password));
         output.println(request);
         handleSessionResponse();
     }
 
     // Logout
     private void logout(BufferedReader console) throws IOException {
-        output.println("{}");
+        System.out.print("Username: "); // Ask the user to enter the username of the profile to logout
+        String username = console.readLine();
+        output.println(Map.of("operation","logout","username", username));
         handleSessionResponse();
     }
 
@@ -126,7 +127,7 @@ public class CrossClientMain {
         // Handle server response about user activity
         private void handleSessionResponse() throws IOException {
             String jsonResponse = input.readLine();
-            System.out.println("Risposta ricevuta: " + jsonResponse);
+            // System.out.println("Risposta ricevuta: " + jsonResponse); // Debug
             UserSessionResponse response = gson.fromJson(jsonResponse, UserSessionResponse.class);
     
             System.out.println(response.toString()); // print the server response
@@ -139,10 +140,11 @@ public class CrossClientMain {
             while (true) {
                 System.out.println("\n--- Menu CROSS ---");
                 System.out.println("1. Register");
-                System.out.println("2. Login");
-                System.out.println("3. Logout");
+                System.out.println("2. Update credentials");
+                System.out.println("3. Login");
+                System.out.println("4. Logout");
                 System.out.println("0. Exit");
-                System.out.print("Inserisci comando: ");
+                System.out.print("Choose the operation: ");
                 command = console.readLine();
 
                 if (command.equals("0"))
@@ -160,8 +162,9 @@ public class CrossClientMain {
     private void handleCommand(String command, BufferedReader console) throws IOException {
         switch (command) {
             case "1" -> register(console);
-            case "2" -> login(console);
-            case "3" -> logout(console);
+            case "2" -> updateCredentials(console);
+            case "3" -> login(console);
+            case "4" -> logout(console);
             default -> System.out.println("Comando non riconosciuto.");
         }
     }

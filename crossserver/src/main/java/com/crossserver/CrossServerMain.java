@@ -91,7 +91,8 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response",100,"errorMessage","OK"));
     }
 
-    // Login utente
+    // User login
+    // tested and working
     public String login(JsonObject request) {
         String username = request.get("username").getAsString();
         String old_password = request.get("password").getAsString();
@@ -101,33 +102,42 @@ public class CrossServerMain {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Credenziali errate"));
         }
 
-        return gson.toJson(Map.of("response", 100, "errorMessage", ""));
+        // Start user session
+        sessionManager.loginUser(username);
+
+        return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
 
-    // Aggiornamento credenziali
+    // Update user credentials
+    // tested and working
     public String updateCredentials(JsonObject request) {
+        if (!request.has("username") || !request.has("old_password") || !request.has("new-password")) {
+            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
+        }
         String username = request.get("username").getAsString();
-        String oldPassword = request.get("password").getAsString();
-        String newPassword = request.get("new_password").getAsString();
+        String oldPassword = request.get("old_password").getAsString();
+        String newPassword = request.get("new-password").getAsString();
+        
+        
+        String user_password = usersDB.get(username);
+        
+        if (user_password == null || !user_password.equals(oldPassword)) {
+            return gson.toJson(Map.of("response", 102, "errorMessage", "Credentials are not correct"));
+        }
         
         if (newPassword.equals(oldPassword)) {
             return gson.toJson(
-                    Map.of("response", 103, "errorMessage", "La nuova password non può essere uguale alla vecchia"));
+                    Map.of("response", 103, "errorMessage", "New password must be different from the old one"));
         }
-
-        String user_password = usersDB.get(username);
-
-        if (user_password == null || !user_password.equals(oldPassword)) {
-            return gson.toJson(Map.of("response", 102, "errorMessage", "Credenziali errate"));
-        }
-
 
         usersDB.put(username, newPassword); // update the user's password
 
         return gson.toJson(Map.of("response", 100, "errorMessage", "Password updated successfully"));
     }
 
-    public String logout(JsonObject request){ // TODO: da finire di completare , vedi se è il caso o meno di aggiungere parametri alla richiesta json tipo il nome dell'utente
+    // Logout
+    // tested and working
+    public String logout(JsonObject request){
         String username = request.get("username").getAsString();
 
         if (!sessionManager.isUserLoggedIn(username)) {
@@ -135,10 +145,8 @@ public class CrossServerMain {
         }
         return gson.toJson(Map.of("response", 100, "errorMessage", "You are now logged out"));
     }
-    // TODO : previous methods need to be checked
 
-
-    // // Gestione Limit Order
+    // Gestione Limit Order
     // public String handleLimitOrder(JsonObject request) {
 
     // }

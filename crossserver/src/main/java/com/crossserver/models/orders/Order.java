@@ -5,24 +5,25 @@ public class Order {
     private final long orderId;
     private final String type; // Order type: bid or ask
     private final String orderType; // Order type: limit, market or stop 
-    private final long size; // Order size
+    private long size; // Order size
     private final long price; // Order price 
     private final long timestamp; // Order timestamp
     private final long userId; // User ID
     private boolean isClosed; // Order status
 
     // Constructor to read the order from the database
-    public Order(long orderId, String type, String orderType, long size, long price, long timestamp, long userId,) {
+    public Order(long orderId, String type, String orderType, long size, long price, long timestamp, long userId) {
         this.orderId = orderId;
         this.type = type;
         this.orderType = orderType;
         this.size = size;
         this.price = price;
         this.timestamp = timestamp;
+        this.userId = userId;
     }
 
-    public Order (String type, String orderType, long size, long price, long timestamp) {
-        this(++orderIdCounter, type, orderType, size, price, timestamp);
+    public Order(String type, String orderType, long size, long price, long timestamp, long userId) {
+        this(++orderIdCounter, type, orderType, size, price, timestamp, userId);
     }
 
     public long getOrderId() {
@@ -52,8 +53,14 @@ public class Order {
     public long getUserId() {
         return userId;
     }
-    public void setUserId(long userId) {
-        this.userId = userId;
+    public boolean isClosed() {
+        return isClosed;
+    }
+    public void setClosed(boolean isClosed) {
+        this.isClosed = isClosed;
+    }
+    public void setSize(long size) {
+        this.size = size;
     }
     
 }

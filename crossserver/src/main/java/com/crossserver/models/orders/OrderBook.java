@@ -8,15 +8,48 @@ public class OrderBook {
     private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> bidBook; // buy
     private final ConcurrentLinkedQueue<Order> orderHistory; // order history
 
+    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> stopBidOrders;
+    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> stopAskOrders;
+
     public OrderBook() {
         this.askBook = new ConcurrentSkipListMap<>();
         this.bidBook = new ConcurrentSkipListMap<>(Comparator.reverseOrder());
         this.orderHistory = new ConcurrentLinkedQueue<>();
+        this.stopBidOrders = new ConcurrentSkipListMap<>();
+        this.stopAskOrders = new ConcurrentSkipListMap<>();
     }
 
     // Aggiunge un ordine di vendita
     private void addAskOrder(Order order) {
         askBook.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
+    }
+
+    public void insertStopOrder(Order order) {
+        if (order.getType().equals("buy")) {
+            stopBidOrders.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
+        } else if (order.getType().equals("sell")) {
+            stopAskOrders.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
+        }
+    }
+
+    private void activateStopOrders(long currentPrice) {
+        // Activate stop-buy
+        stopBidOrders.headMap(currentPrice, true).forEach((price, queue) -> {
+            while (!queue.isEmpty()) {
+                Order stopOrder = queue.poll();
+                insertLimitOrder(stopOrder); // Create a limit order
+            }
+            stopBidOrders.remove(price); // Remove the stop order
+        });
+
+        // Activate stop-sell
+        stopAskOrders.tailMap(currentPrice, false).forEach((price, queue) -> {
+            while (!queue.isEmpty()) {
+                Order stopOrder = queue.poll();
+                insertLimitOrder(stopOrder); // Create a limit order
+            }
+            stopAskOrders.remove(price); // Remove the stop order
+        });
     }
 
     public void insertLimitOrder(Order order) {
@@ -81,6 +114,7 @@ public class OrderBook {
             if (!assigned) {
                 executedOrderPrice = price;
                 assigned = true;
+                activateStopOrders(executedOrderPrice); // Attivazione degli stop order
             }
 
         }
@@ -106,7 +140,6 @@ public class OrderBook {
         orderHistory.offer(order);
         return order.getOrderId();
     }
-
 
     // Execute a sell order against the buy book
     // TODO : to test
@@ -141,13 +174,17 @@ public class OrderBook {
                     // orders
                 }
                 // Assign the price of the executed order only once
-                if (!assigned) {
-                    executedOrderPrice = price;
-                    assigned = true;
-                }
+
             }
             if (remainingSize == 0)
                 break;
+                
+            if (!assigned) {
+                executedOrderPrice = price;
+                assigned = true;
+                activateStopOrders(executedOrderPrice); // Attivazione degli stop order
+            }
+
         }
 
         if (remainingSize > 0) {

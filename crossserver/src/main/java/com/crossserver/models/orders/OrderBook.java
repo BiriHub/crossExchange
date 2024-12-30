@@ -1,6 +1,7 @@
 package com.crossserver.models.orders;
 
 import java.util.Comparator;
+import java.util.Map.Entry;
 import java.util.concurrent.*;
 
 public class OrderBook {
@@ -19,7 +20,7 @@ public class OrderBook {
         this.stopAskOrders = new ConcurrentSkipListMap<>();
     }
 
-    // Aggiunge un ordine di vendita
+    // Add an order to the order book
     private void addAskOrder(Order order) {
         askBook.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
     }
@@ -82,7 +83,7 @@ public class OrderBook {
         // impossibility to fulfill the order
         ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> temp = new ConcurrentSkipListMap<>(askBook);
 
-        for (var entry : temp.entrySet()) {
+        for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
             long price = entry.getKey();
             ConcurrentLinkedQueue<Order> queue = entry.getValue();
 
@@ -152,7 +153,7 @@ public class OrderBook {
         // impossibility to fulfill the order
         ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> temp = new ConcurrentSkipListMap<>(bidBook);
 
-        for (var entry : temp.entrySet()) {
+        for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
             long price = entry.getKey();
             ConcurrentLinkedQueue<Order> queue = entry.getValue();
 
@@ -192,11 +193,56 @@ public class OrderBook {
         }
 
         // Apply changes from temp to bidBook
-        for (var entry : temp.entrySet()) {
+        for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
             bidBook.put(entry.getKey(), entry.getValue());
         }
 
         Order marketOrder = new Order(type, "market", size, executedOrderPrice, timestamp, userId);
         return addOrderHistory(marketOrder);
     }
-}
+
+    // Cancel an order from the order book
+    public long cancelOrder(long orderId) {
+        if (cancelOrderFromBook(askBook, orderId))
+            return orderId;
+        if (cancelOrderFromBook(bidBook, orderId))
+            return orderId;
+        if (cancelOrderFromBook(stopAskOrders, orderId))
+            return orderId;
+        if (cancelOrderFromBook(stopBidOrders, orderId))
+            return orderId;
+        return orderId;
+    }
+
+    // TODO : to test
+    private boolean cancelOrderFromBook(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> book, long orderId) {
+        for (ConcurrentLinkedQueue<Order> queue : book.values()) {
+            if (queue.removeIf(order -> order.getOrderId() == orderId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public Order getOrder(long orderId) {
+        Order order = findOrderInBook(askBook, orderId);
+        if (order != null) return order;
+
+        order = findOrderInBook(bidBook, orderId);
+        if (order != null) return order;
+
+        order = findOrderInBook(stopAskOrders, orderId);
+        if (order != null) return order;
+
+        return findOrderInBook(stopBidOrders, orderId);
+    }
+
+    private Order findOrderInBook(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> book, long orderId) {
+        for (ConcurrentLinkedQueue<Order> queue : book.values()) {
+            for (Order order : queue) {
+                if (order.getOrderId() == orderId) {
+                    return order;
+                }
+            }
+        }
+        return null;

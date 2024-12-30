@@ -285,12 +285,28 @@ public class CrossServerMain {
         return gson.toJson(Map.of("orderID", order.getOrderId()));
     }
 
-    // // Cancellazione ordini (placeholder)
-    // public String cancelOrder(JsonObject request) {
+    // Cancellazione ordini (placeholder)
+    // TODO to test
+    public String cancelOrder(JsonObject request) {
+        if (!request.has("orderId") || !request.has("userId")) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
+        }
+        long userId= request.get("userId").getAsLong(); 
+        long orderId = request.get("orderId").getAsLong();
 
-    // }
+        Order order=orderBook.getOrder(orderId);
 
-    // // Recupero storico prezzi (placeholder)
+        if (order==null)
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Order not found"));
+        if (order.getUserId()!=userId)
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Order belongs to another user"));
+        if (order.isClosed())
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Order has been executed"));
+        
+        orderBook.cancelOrder(orderId);
+        return gson.toJson(Map.of("response", 100, "errorMessage", "OK")); // order has been deleted
+    }
+
     // public String getPriceHistory(JsonObject request) {
 
     // }

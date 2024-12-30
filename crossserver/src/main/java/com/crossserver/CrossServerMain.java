@@ -33,7 +33,7 @@ public class CrossServerMain {
     private static final String CONFIG_FILE = "server.properties"; // Configuration file
     private static final String USERS_DB = "users.json"; // User database file
 
-    private final ConcurrentMap<String, User> usersDB;
+    private final ConcurrentMap<String, String> usersDB; // User database : username, encrypPassword
     private final OrderBook orderBook;
 
     private ServerSocket serverSocket; // Server socket
@@ -142,6 +142,10 @@ public class CrossServerMain {
 
     // Registrazione utente
     public String register(JsonObject request) {
+        if (!request.has("username") || !request.has("password")) {
+            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
+        }
+
         String username = request.get("username").getAsString();
         String password = request.get("password").getAsString();
 
@@ -149,12 +153,70 @@ public class CrossServerMain {
             return gson.toJson(Map.of("response", 103, "errorMessage", "User parameter not found"));
         }
 
+        // check if the password matches the pattern
+        // TODO to test
+        if (!checkPassword(password)) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid password"));
+        }
+
+        // check if the username is already taken
         if (usersDB.containsKey(username)) {
             return gson.toJson(Map.of("response", 102, "errorMessage", "Username not available"));
         }
-        usersDB.put(username, new User(username, hashPassword(password)));
+        usersDB.put(username, hashPassword(password));
 
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
+    }
+
+    private boolean checkPassword(String password) {
+        /*
+         * ^ represents starting character of the string.
+         * (?=.*[0-9]) represents a digit must occur at least once.
+         * (?=.*[a-z]) represents a lower case alphabet must occur at least once.
+         * (?=.*[A-Z]) represents an upper case alphabet that must occur at least once.
+         * (?=\\S+$) white spaces don’t allowed in the entire string.
+         * .{8, 20} represents at least 8 characters and at most 20 characters.
+         * $ represents the end of the string.
+         */
+        String pattern = "^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=\\S+$).{8,20}$";
+        return password.matches(pattern);
+    }
+
+    // Update user credentials
+    // tested and working
+    public String updateCredentials(JsonObject request) {
+        if (!request.has("username") || !request.has("old_password") || !request.has("new-password")) {
+            return gson.toJson(Map.of("response", 105, "errorMessage", "Missing parameters"));
+        }
+        String username = request.get("username").getAsString();
+        String oldPassword = request.get("old_password").getAsString();
+        String newPassword = request.get("new-password").getAsString();
+
+        String user_password = usersDB.get(username);
+        
+        if (!checkPassword(newPassword)) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid new password"));
+        }
+        if (user_password == null) {
+            return gson.toJson(Map.of("response", 102, "errorMessage", "Non-existent username"));
+        }
+        
+        if (!user_password.equals(hashPassword(oldPassword))) {
+            return gson.toJson(Map.of("response", 102, "errorMessage", "Username/old password mismatch"));
+        }
+        
+
+        if (newPassword.equals(oldPassword)) {
+            return gson.toJson(Map.of("response", 103, "errorMessage", "New password equal to the old one"));
+        }
+
+        if (sessionManager.isUserLoggedIn(username)) {
+            return gson.toJson(Map.of("response", 104, "errorMessage", "User currently logged in"));
+        }
+
+        usersDB.put(username, hashPassword(newPassword)); // update the user's password
+
+        return gson.toJson(Map.of("response", 100, "errorMessage", "Password updated successfully"));
     }
 
     // User login
@@ -163,9 +225,9 @@ public class CrossServerMain {
         String username = request.get("username").getAsString();
         String password = request.get("password").getAsString();
 
-        String storedPassword = usersDB.get(username).getEncryptedPassword();
-        String checkPassword= hashPassword(password);
-        
+        String storedPassword = usersDB.get(username);
+        String checkPassword = hashPassword(password);
+
         if (password == null || !storedPassword.equals(checkPassword)) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Credenziali errate"));
         }
@@ -176,37 +238,9 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
 
-    // Update user credentials
-    // tested and working
-    public String updateCredentials(JsonObject request) {
-        if (!request.has("username") || !request.has("old_password") || !request.has("new-password")) {
-            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
-        }
-        String username = request.get("username").getAsString();
-        String oldPassword = request.get("old_password").getAsString();
-        String newPassword = request.get("new-password").getAsString();
-        
-        User user = usersDB.get(username);
-        String user_password = user.getEncryptedPassword();
-        
-        if (user_password == null || !user_password.equals(oldPassword)) {
-            return gson.toJson(Map.of("response", 102, "errorMessage", "Credentials are not correct"));
-        }
-        
-        if (newPassword.equals(oldPassword)) {
-            return gson.toJson(
-                    Map.of("response", 103, "errorMessage", "New password must be different from the old one"));
-        }
-        user.setEncryptedPassword(hashPassword(newPassword));
-
-        usersDB.put(username,user); // update the user's password
-
-        return gson.toJson(Map.of("response", 100, "errorMessage", "Password updated successfully"));
-    }
-
     // Logout
     // tested and working
-    public String logout(JsonObject request){
+    public String logout(JsonObject request) {
         String username = request.get("username").getAsString();
 
         if (!sessionManager.isUserLoggedIn(username)) {
@@ -226,7 +260,7 @@ public class CrossServerMain {
         String type = request.get("type").getAsString();
 
         if (!type.equals("bid") && !type.equals("ask")) {
-            return gson.toJson(Map.of("orderID",-1)); // error
+            return gson.toJson(Map.of("orderID", -1)); // error
         }
 
         // limit order creation
@@ -239,18 +273,18 @@ public class CrossServerMain {
         Order order = new Order(type, orderType, size, price, timestamp, userId);
 
         orderBook.insertLimitOrder(order);
-        return gson.toJson(Map.of("orderID",order.getUserId())); // error
-    } 
+        return gson.toJson(Map.of("orderID", order.getUserId())); // error
+    }
 
     // Gestione Market Order (placeholder)
     public String handleMarketOrder(JsonObject request) {
         if (!request.has("type") || !request.has("size") || !request.has("userId")) {
-            return gson.toJson(Map.of("orderID",-1)); // error: missing parameters
+            return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
 
         String type = request.get("type").getAsString();
         if (!type.equals("bid") && !type.equals("ask")) {
-            return gson.toJson(Map.of("orderID",-1)); // error
+            return gson.toJson(Map.of("orderID", -1)); // error
         }
 
         // market order creation
@@ -258,9 +292,8 @@ public class CrossServerMain {
         long size = request.get("size").getAsLong();
         long timestamp = request.get("timestamp").getAsLong();
         long userId = request.get("userId").getAsLong();
-        lond executedOrderid=orderBook.insertMarketOrder(type, size, timestamp, userId);
-        return gson.toJson(Map.of("orderID",executedOrderid)); // error
-
+        lond executedOrderid = orderBook.insertMarketOrder(type, size, timestamp, userId);
+        return gson.toJson(Map.of("orderID", executedOrderid)); // error
 
     }
 
@@ -268,18 +301,18 @@ public class CrossServerMain {
         if (!request.has("type") || !request.has("size") || !request.has("price") || !request.has("userId")) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
         }
-    
+
         String type = request.get("type").getAsString();
         if (!type.equals("buy") && !type.equals("sell")) {
             return gson.toJson(Map.of("orderID", -1)); // Errore
         }
-    
+
         String orderType = "stop";
         long size = request.get("size").getAsLong();
         long price = request.get("price").getAsLong();
         long timestamp = request.get("timestamp").getAsLong();
         long userId = request.get("userId").getAsLong();
-    
+
         Order order = new Order(type, orderType, size, price, timestamp, userId);
         orderBook.insertStopOrder(order);
         return gson.toJson(Map.of("orderID", order.getOrderId()));
@@ -291,18 +324,18 @@ public class CrossServerMain {
         if (!request.has("orderId") || !request.has("userId")) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
         }
-        long userId= request.get("userId").getAsLong(); 
+        long userId = request.get("userId").getAsLong();
         long orderId = request.get("orderId").getAsLong();
 
-        Order order=orderBook.getOrder(orderId);
+        Order order = orderBook.getOrder(orderId);
 
-        if (order==null)
+        if (order == null)
             return gson.toJson(Map.of("response", 101, "errorMessage", "Order not found"));
-        if (order.getUserId()!=userId)
+        if (order.getUserId() != userId)
             return gson.toJson(Map.of("response", 101, "errorMessage", "Order belongs to another user"));
         if (order.isClosed())
             return gson.toJson(Map.of("response", 101, "errorMessage", "Order has been executed"));
-        
+
         orderBook.cancelOrder(orderId);
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK")); // order has been deleted
     }

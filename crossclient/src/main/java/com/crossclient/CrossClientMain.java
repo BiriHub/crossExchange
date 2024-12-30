@@ -3,9 +3,6 @@ package com.crossclient;
 import java.io.*;
 import java.net.*;
 
-import com.crossclient.models.requestTypes.LoginRequest;
-import com.crossclient.models.requestTypes.RegistrationRequest;
-import com.crossclient.models.responseTypes.UserSessionResponse;
 import com.google.gson.*;
 
 import java.util.Map;
@@ -18,6 +15,10 @@ public class CrossClientMain {
     private String serverHost; // Server host
     private int serverPort; // Server port
     private Socket socket; // Socket
+
+    private long userSessionTimestamp; // User session timestamp: used to check the user session
+    private long maxLoginTime; // Maximum login time: it is sent by the server to the client when the user logs
+                               // in
 
     private BufferedReader input; // Input stream of the socket
     private PrintWriter output; // Output stream of the socket
@@ -79,10 +80,19 @@ public class CrossClientMain {
         System.out.print("Password: ");
         String password = console.readLine();
 
-        String request = gson.toJson(Map.of("operation","register","username", username, "password", password));
-        System.out.println("Richista creata: "+ request);
+        String request = gson.toJson(Map.of("operation", "register", "username", username, "password", password));
+        System.out.println("Richista creata: " + request);
         output.println(request);
-        handleSessionResponse();
+
+        // Response parsing
+        String response = input.readLine();
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+        if (jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
+            int responseCode = jsonResponse.get("response").getAsInt();
+            String errorMessage = jsonResponse.get("errorMessage").getAsString();
+            System.out.println("[!] Response code: " + responseCode + " - " + errorMessage);
+        }
+
     }
 
     // Update user credentials
@@ -93,9 +103,18 @@ public class CrossClientMain {
         String currentPassword = console.readLine();
         System.out.print("New password: ");
         String newPassword = console.readLine();
-        String request = gson.toJson(Map.of("operation","updateCredentials","username", username, "old_password", currentPassword, "new-password", newPassword));
+        String request = gson.toJson(Map.of("operation", "updateCredentials", "username", username, "old_password",
+                currentPassword, "new-password", newPassword));
         output.println(request);
-        handleSessionResponse();
+
+        // Response parsing
+        String response = input.readLine();
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+        if (jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
+            int responseCode = jsonResponse.get("response").getAsInt();
+            String errorMessage = jsonResponse.get("errorMessage").getAsString();
+            System.out.println("[!] Response code: " + responseCode + " - " + errorMessage);
+        }
     }
 
     // User login
@@ -105,7 +124,7 @@ public class CrossClientMain {
         System.out.print("Password: ");
         String password = console.readLine();
 
-        String request = gson.toJson(Map.of("operation","login","username", username, "password", password));
+        String request = gson.toJson(Map.of("operation", "login", "username", username, "password", password));
         output.println(request);
         handleSessionResponse();
     }
@@ -114,30 +133,44 @@ public class CrossClientMain {
     private void logout(BufferedReader console) throws IOException {
         System.out.print("Username: "); // Ask the user to enter the username of the profile to logout
         String username = console.readLine();
-        output.println(Map.of("operation","logout","username", username));
+        output.println(Map.of("operation", "logout", "username", username));
         handleSessionResponse();
     }
 
     // // Handle server response about user activity
     // private void handleSessionResponse() throws IOException {
-    //     UserSessionResponse response = gson.fromJson(input.readLine(),UserSessionResponse.class);
+    // UserSessionResponse response =
+    // gson.fromJson(input.readLine(),UserSessionResponse.class);
 
-    //     System.out.println(response.toString()); // print the server response
+    // System.out.println(response.toString()); // print the server response
     // }
-        // Handle server response about user activity
-        private void handleSessionResponse() throws IOException {
-            String jsonResponse = input.readLine();
-            // System.out.println("Risposta ricevuta: " + jsonResponse); // Debug
-            UserSessionResponse response = gson.fromJson(jsonResponse, UserSessionResponse.class);
-    
-            System.out.println(response.toString()); // print the server response
-        }
+    // Handle server response about user activity
+    // // private void handleSessionResponse() throws IOException {
+    // // // TODO : da completare
+    // // String jsonResponse = input.readLine();
+    // // JsonObject response =
+    // JsonParser.parseString(jsonResponse).getAsJsonObject();
+    // // if (response.has("response")) {
+    // // int responseCode = response.get("response").getAsInt();
+    // // String errorMessage = response.get("errorMessage").getAsString();
+    // // UserSessionResponse userSessionResponse = new
+    // UserSessionResponse(responseCode, errorMessage);
+    // // System.out.println(userSessionResponse.toString()); // print the server
+    // response
+    // // } else
+    // // System.out.println(response.toString()); // print the server response
+    // // }
 
     // Menu principale
     public void start() {
         try (BufferedReader console = new BufferedReader(new InputStreamReader(System.in))) {
             String command;
             while (true) {
+
+                if (userSessionTimestamp == 0 || System.currentTimeMillis() - userSessionTimestamp > 60000) {
+                    System.out.println("Sessione scaduta. Eseguire nuovamente il login.");
+                    userSessionTimestamp = 0;
+                }
                 System.out.println("\n--- Menu CROSS ---");
                 System.out.println("1. Register");
                 System.out.println("2. Update credentials");
@@ -169,15 +202,15 @@ public class CrossClientMain {
         }
     }
 
-        // Main
-        public static void main(String[] args) {
-            try {
-                CrossClientMain client = new CrossClientMain();
-                client.connectToServer();
-                client.start();
-            } catch (IOException e) {
-                System.err.println("Errore nell'avvio del client: " + e.getMessage());
-            }
+    // Main
+    public static void main(String[] args) {
+        try {
+            CrossClientMain client = new CrossClientMain();
+            client.connectToServer();
+            client.start();
+        } catch (IOException e) {
+            System.err.println("Errore nell'avvio del client: " + e.getMessage());
         }
+    }
 
 }

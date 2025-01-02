@@ -193,18 +193,17 @@ public class CrossServerMain {
         String newPassword = request.get("new-password").getAsString();
 
         String user_password = usersDB.get(username);
-        
+
         if (!checkPassword(newPassword)) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid new password"));
         }
         if (user_password == null) {
             return gson.toJson(Map.of("response", 102, "errorMessage", "Non-existent username"));
         }
-        
+
         if (!user_password.equals(hashPassword(oldPassword))) {
             return gson.toJson(Map.of("response", 102, "errorMessage", "Username/old password mismatch"));
         }
-        
 
         if (newPassword.equals(oldPassword)) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "New password equal to the old one"));
@@ -221,15 +220,30 @@ public class CrossServerMain {
 
     // User login
     // tested and working
-    public String login(JsonObject request) {
+    public String login(JsonObject request, UserHandler activeConnection) {
+        if (!request.has("username") || !request.has("password")) {
+            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
+        }
+
         String username = request.get("username").getAsString();
         String password = request.get("password").getAsString();
 
         String storedPassword = usersDB.get(username);
         String checkPassword = hashPassword(password);
 
-        if (password == null || !storedPassword.equals(checkPassword)) {
-            return gson.toJson(Map.of("response", 101, "errorMessage", "Credenziali errate"));
+        // check if the user exists
+        if (password == null) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Non existent username"));
+        }
+
+        // check if the user is already logged in
+        if (sessionManager.isUserLoggedIn(username)) {
+            return gson.toJson(Map.of("response", 102, "errorMessage", "User already logged in"));
+        }
+
+        // check if the password is correct
+        if (!storedPassword.equals(checkPassword)) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Username/password mismatch"));
         }
 
         // Start user session
@@ -240,13 +254,34 @@ public class CrossServerMain {
 
     // Logout
     // tested and working
-    public String logout(JsonObject request) {
+    public String logout(JsonObject request, UserHandler activeConnection) {
+
+        if (!request.has("username")) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
+        }
         String username = request.get("username").getAsString();
+
+        // Check if the username corresponds to the current active connection
+        if (!activeConnection.equals(activeUserConnections.get(username))) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Username/connection mismatch"));
+        }
+
+        // check if the user is already logged in
+        if (!sessionManager.isUserLoggedIn(username)) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "User not logged in"));
+        }
+
+        // check if the user exists
+        if (usersDB.get(username) == null) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Non existent username"));
+        }
 
         if (!sessionManager.isUserLoggedIn(username)) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "User is not logged in"));
         }
         return gson.toJson(Map.of("response", 100, "errorMessage", "You are now logged out"));
+
+        return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
 
     // Gestione Limit Order

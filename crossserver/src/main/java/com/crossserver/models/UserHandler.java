@@ -63,9 +63,9 @@ public class UserHandler implements Runnable {
                 case "updateCredentials": // Aggiornamento credenziali
                     return server.updateCredentials(request);
                 case "login": // Login
-                    return server.login(request);
+                    return server.login(request, this);
                 case "logout": // Logout
-                    return server.logout(request);
+                    return server.logout(request,this);
                 // case "3": // Inserimento Limit Order
                 //     return handleLimitOrder(request);
                 // case "4": // Inserimento Market Order

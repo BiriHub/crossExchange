@@ -19,6 +19,7 @@ public class CrossClientMain {
     private long userSessionTimestamp; // User session timestamp: used to check the user session
     private long maxLoginTime; // Maximum login time: it is sent by the server to the client when the user logs
                                // in
+    private String usernameLoggedIn; // Username of the user logged in
 
     private BufferedReader input; // Input stream of the socket
     private PrintWriter output; // Output stream of the socket
@@ -90,22 +91,97 @@ public class CrossClientMain {
         if (jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
             int responseCode = jsonResponse.get("response").getAsInt();
             String errorMessage = jsonResponse.get("errorMessage").getAsString();
-            System.out.println("[!] Response code: " + responseCode + " - " + errorMessage);
+            System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
         }
 
     }
 
     // Update user credentials
     private void updateCredentials(BufferedReader console) throws IOException {
-        System.out.print("Username: ");
-        String username = console.readLine();
-        System.out.print("Current password: ");
-        String currentPassword = console.readLine();
-        System.out.print("New password: ");
-        String newPassword = console.readLine();
-        String request = gson.toJson(Map.of("operation", "updateCredentials", "username", username, "old_password",
-                currentPassword, "new-password", newPassword));
-        output.println(request);
+        if (!amIlogged()) {
+
+            System.out.print("Username: ");
+            String username = console.readLine();
+            System.out.print("Current password: ");
+            String currentPassword = console.readLine();
+            System.out.print("New password: ");
+            String newPassword = console.readLine();
+            String request = gson.toJson(Map.of("operation", "updateCredentials", "username", username, "old_password",
+                    currentPassword, "new-password", newPassword));
+            output.println(request);
+
+            // Response parsing
+            String response = input.readLine();
+            JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+            if (jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
+                int responseCode = jsonResponse.get("response").getAsInt();
+                String errorMessage = jsonResponse.get("errorMessage").getAsString();
+                System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
+            }
+        } else {
+            System.out.println("[!] Server response code: 104 - user currently logged in"); // locally check if the user
+                                                                                            // is logged in and print
+                                                                                            // the message instead of
+                                                                                            // sending the request to
+                                                                                            // the server
+        }
+    }
+
+    // User login
+    private void login(BufferedReader console) throws IOException {
+        if (!amIlogged()) {
+            System.out.print("Username: ");
+            String username = console.readLine();
+            System.out.print("Password: ");
+            String password = console.readLine();
+
+            String request = gson.toJson(Map.of("operation", "login", "username", username, "password", password));
+            output.println(request);
+
+            // Response parsing
+            String response = input.readLine();
+            JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+            if (jsonResponse.has("session") && jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
+
+                int responseCode = jsonResponse.get("response").getAsInt();
+                String errorMessage = jsonResponse.get("errorMessage").getAsString();
+
+                // 100 - login successful
+                if (responseCode == 100) {
+                    maxLoginTime = jsonResponse.get("session").getAsLong(); // Save the maximum login time for users
+                    userSessionTimestamp = System.currentTimeMillis(); // Save the timestamp of the beginning of user
+                                                                       // session
+                    usernameLoggedIn = username; // Save the username of the user logged in
+                }
+
+                System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
+            }
+        } else {
+            System.out.println("[!] Server response code: 102 - user currently logged in"); // locally check if the user
+                                                                                            // is logged in and print
+                                                                                            // the message instead of
+                                                                                            // sending the request to
+                                                                                            // the server
+        }
+
+    }
+
+    // Check if the user is logged in
+    // da verificare se è davvero necessaria localmente
+    public boolean amIlogged() {
+        return (System.currentTimeMillis() - userSessionTimestamp) < maxLoginTime;
+    }
+
+    // Logout
+    private void logout(BufferedReader console) throws IOException {
+        if (!amIlogged() || usernameLoggedIn == null) {
+            System.out.println("[!] Server response code: 101 - user not logged in"); // locally check if the user is
+                                                                                      // logged in and print the message
+                                                                                      // instead of sending the request
+                                                                                      // to the server
+            return;
+        }
+        output.println(Map.of("operation", "logout", "username", usernameLoggedIn));
 
         // Response parsing
         String response = input.readLine();
@@ -113,75 +189,67 @@ public class CrossClientMain {
         if (jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
             int responseCode = jsonResponse.get("response").getAsInt();
             String errorMessage = jsonResponse.get("errorMessage").getAsString();
-            System.out.println("[!] Response code: " + responseCode + " - " + errorMessage);
+            if (responseCode == 100) {
+                userSessionTimestamp = 0; // Reset the user session timestamp
+                usernameLoggedIn = null; // Reset the username of the user logged in
+            }
+            System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
+
         }
     }
-
-    // User login
-    private void login(BufferedReader console) throws IOException {
-        System.out.print("Username: ");
-        String username = console.readLine();
-        System.out.print("Password: ");
-        String password = console.readLine();
-
-        String request = gson.toJson(Map.of("operation", "login", "username", username, "password", password));
-        output.println(request);
-        handleSessionResponse();
-    }
-
-    // Logout
-    private void logout(BufferedReader console) throws IOException {
-        System.out.print("Username: "); // Ask the user to enter the username of the profile to logout
-        String username = console.readLine();
-        output.println(Map.of("operation", "logout", "username", username));
-        handleSessionResponse();
-    }
-
-    // // Handle server response about user activity
-    // private void handleSessionResponse() throws IOException {
-    // UserSessionResponse response =
-    // gson.fromJson(input.readLine(),UserSessionResponse.class);
-
-    // System.out.println(response.toString()); // print the server response
-    // }
-    // Handle server response about user activity
-    // // private void handleSessionResponse() throws IOException {
-    // // // TODO : da completare
-    // // String jsonResponse = input.readLine();
-    // // JsonObject response =
-    // JsonParser.parseString(jsonResponse).getAsJsonObject();
-    // // if (response.has("response")) {
-    // // int responseCode = response.get("response").getAsInt();
-    // // String errorMessage = response.get("errorMessage").getAsString();
-    // // UserSessionResponse userSessionResponse = new
-    // UserSessionResponse(responseCode, errorMessage);
-    // // System.out.println(userSessionResponse.toString()); // print the server
-    // response
-    // // } else
-    // // System.out.println(response.toString()); // print the server response
-    // // }
 
     // Menu principale
     public void start() {
         try (BufferedReader console = new BufferedReader(new InputStreamReader(System.in))) {
             String command;
+            System.out.println("\n--- Menu CROSS ---");
+
+            // First access: registration and login
+            do {
+                System.out.println(
+                        "Before proceding with trading operations you firstly need to register an account and log in:");
+                System.out.println("Select an operation:");
+                System.out.println("1. Register");
+                System.out.println("2. Login");
+                System.out.println("3. Update credentials");
+                System.out.println("4. Close the application");
+                command = console.readLine();
+                switch (command) {
+                    case "1":
+                        register(console);
+                    case "2":
+                        login(console);
+                    case "3":
+                        updateCredentials(console);
+                    case "4":
+                        break;
+                    default:
+                        System.out.println("Command not recognized.Please select a valid operation.");
+                }
+
+            } while (!amIlogged());
+
+            // Main menu after login
             while (true) {
 
-                if (userSessionTimestamp == 0 || System.currentTimeMillis() - userSessionTimestamp > 60000) {
-                    System.out.println("Sessione scaduta. Eseguire nuovamente il login.");
-                    userSessionTimestamp = 0;
-                }
-                System.out.println("\n--- Menu CROSS ---");
-                System.out.println("1. Register");
-                System.out.println("2. Update credentials");
-                System.out.println("3. Login");
-                System.out.println("4. Logout");
-                System.out.println("0. Exit");
-                System.out.print("Choose the operation: ");
+                System.out.println("\n-------------");
+                System.out.println("Welcome " + usernameLoggedIn + "!");
+                System.out.println("\n-------------");
+                System.out.println("Select an operation:");
+                System.out.println("1. Insert limit order");
+                System.out.println("2. Insert market order");
+                System.out.println("3. Insert stop order");
+                System.out.println("4. Cancel order");
+                System.out.println("5. Price history");
+                System.out.println("6. Logout");
+                System.out.println("7. Close the application");
+                System.out.println("\n-------------");
                 command = console.readLine();
 
-                if (command.equals("0"))
+                if (command.equals("7")) {
+                    logout(console);
                     break;
+                }
                 handleCommand(command, console);
             }
         } catch (IOException e) {
@@ -189,16 +257,19 @@ public class CrossClientMain {
         } finally {
             disconnect();
         }
+        System.out.print("[!] Client closing...");
     }
 
     // Gestione dei comandi
     private void handleCommand(String command, BufferedReader console) throws IOException {
-        switch (command) {
-            case "1" -> register(console);
-            case "2" -> updateCredentials(console);
-            case "3" -> login(console);
-            case "4" -> logout(console);
-            default -> System.out.println("Comando non riconosciuto.");
+        switch (command) { // TODO : add the operations
+            case "1" -> insertLimitOrder(console);
+            case "2" -> insertMarketOrder(console);
+            case "3" -> insertStopOrder(console);
+            case "4" -> cancelOrder(console);
+            case "5" -> getPriceHistory(console);
+            case "6" -> logout(console);
+            default -> System.out.println("Command not recognized.Please select a valid operation.");
         }
     }
 

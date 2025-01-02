@@ -34,6 +34,8 @@ public class CrossServerMain {
     private static final String USERS_DB = "users.json"; // User database file
 
     private final ConcurrentMap<String, String> usersDB; // User database : username, encrypPassword
+    private final ConcurrentMap<String, UserHandler> activeUserConnections; // Active user connections
+
     private final OrderBook orderBook;
 
     private ServerSocket serverSocket; // Server socket
@@ -51,6 +53,7 @@ public class CrossServerMain {
         sessionManager = new SessionManager(max_sessionTime);
         gson = new Gson();
         orderBook = new OrderBook();
+        activeUserConnections = new ConcurrentHashMap<>();
         threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         loadDatabases(USERS_DB);
         // Save the state of the server when it is shut down
@@ -249,6 +252,9 @@ public class CrossServerMain {
         // Start user session
         sessionManager.loginUser(username);
 
+        // Save the user connection
+        activeUserConnections.put(username, activeConnection);
+
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
 
@@ -279,7 +285,7 @@ public class CrossServerMain {
         if (!sessionManager.isUserLoggedIn(username)) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "User is not logged in"));
         }
-        return gson.toJson(Map.of("response", 100, "errorMessage", "You are now logged out"));
+        activeUserConnections.remove(username);
 
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }

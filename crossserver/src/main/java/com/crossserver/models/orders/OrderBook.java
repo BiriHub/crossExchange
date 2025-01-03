@@ -37,7 +37,14 @@ public class OrderBook {
                         stopOrder.getSize(),
                         currentPrice);
 
-                insertMarketOrder(marketOrder.getOrderId(), marketOrder.getType(), marketOrder.getSize(),stopOrder.getUserId());
+                long idORdineEvaso = insertMarketOrder(marketOrder.getOrderId(), marketOrder.getType(),
+                        marketOrder.getSize(),
+                        stopOrder.getUserId());
+                if (idORdineEvaso != -1) {
+                    // stop order has been executed correttamente
+                    stopOrder.setTimestamp(System.currentTimeMillis());
+                    orderHistory.offer(stopOrder);
+                }
             }
             stopBidOrders.remove(price); // Remove the stop order
         });
@@ -46,7 +53,18 @@ public class OrderBook {
         stopAskOrders.tailMap(currentPrice, false).forEach((price, queue) -> {
             while (!queue.isEmpty()) {
                 Order stopOrder = queue.poll();
-                insertLimitOrder(stopOrder); // Create a limit order
+                MarketOrder marketOrder = new MarketOrder(stopOrder.getOrderId(), stopOrder.getType(),
+                        stopOrder.getSize(),
+                        currentPrice);
+                long idORdineEvaso = insertMarketOrder(marketOrder.getOrderId(), marketOrder.getType(),
+                        marketOrder.getSize(),
+                        stopOrder.getUserId());
+                if (idORdineEvaso != -1) {
+                    // stop order has been executed correttamente
+                    stopOrder.setTimestamp(System.currentTimeMillis());
+                    orderHistory.offer(stopOrder);
+                }
+
             }
             stopAskOrders.remove(price); // Remove the stop order
         });
@@ -66,7 +84,7 @@ public class OrderBook {
     }
 
     // Execute a market order
-    public long insertMarketOrder(long orderId, String type, long size, long userId) {
+    public long insertMarketOrder(long orderId, String type, long size, String userId) {
         if (type.equals("bid"))
             return matchBidOrder(orderId, type, size, userId);
         else
@@ -75,7 +93,7 @@ public class OrderBook {
 
     // Esegue un ordine di acquisto contro il book di vendita
     // TODO : to test
-    public long matchBidOrder(long orderId, String type, long size, long userId) {
+    public long matchBidOrder(long orderId, String type, long size, String userId) {
         long remainingSize = size;
         long executedOrderPrice = 0; // price of the first executed order, it will be the price of the market order
         boolean assigned = false; // flag to check if the price has been assigned to the order
@@ -133,6 +151,7 @@ public class OrderBook {
         }
 
         MarketOrder markerOrder = new MarketOrder(orderId, type, size, executedOrderPrice);
+        markerOrder.setUserId(userId);
         // TODO: add the market order to the order history
         return addOrderHistory(markerOrder);
     }
@@ -145,7 +164,7 @@ public class OrderBook {
 
     // Execute a sell order against the buy book
     // TODO : to test
-    public long matchAskOrder(String type, long size, long userId) {
+    public long matchAskOrder(long orderId, String type, long size, String userId) {
         long remainingSize = size;
         long executedOrderPrice = 0;
         boolean assigned = false; // flag to check if the price has been assigned to the order
@@ -160,22 +179,21 @@ public class OrderBook {
 
             while (!queue.isEmpty() && remainingSize > 0) {
                 Order bidOrder = queue.peek(); // TODO peek or poll?
-                long orderSize = bidOrder.getSize();
-                long tradeSize = Math.min(orderSize, remainingSize);
+                long tradeSize = Math.min(bidOrder.getSize(), remainingSize);
 
                 // Reduce the size of the bid order
-                orderSize -= tradeSize;
                 remainingSize -= tradeSize;
 
                 // simulate the matching
-                bidOrder.setSize(orderSize); // Reduce the size of the bid order
+                bidOrder.setSize(bidOrder.getSize() - tradeSize); // Reduce the size of the bid order
 
-                if (orderSize > 0) {
+                if (bidOrder.getSize() == 0) {
                     queue.poll(); // extra the executed order back in the queue
                     // TODO: add the users notification automatic sending operation for the limit
                     // orders
                 }
                 // Assign the price of the executed order only once
+                activateStopOrders(price);
 
             }
             if (remainingSize == 0)
@@ -184,7 +202,6 @@ public class OrderBook {
             if (!assigned) {
                 executedOrderPrice = price;
                 assigned = true;
-                activateStopOrders(executedOrderPrice); // Attivazione degli stop order
             }
 
         }
@@ -198,8 +215,9 @@ public class OrderBook {
             limitBidOrders.put(entry.getKey(), entry.getValue());
         }
 
-        Order marketOrder = new Order(type, "market", size, executedOrderPrice, timestamp, userId);
-        return addOrderHistory(marketOrder);
+        MarketOrder markerOrder = new MarketOrder(orderId, type, size, executedOrderPrice);
+        markerOrder.setUserId(userId);
+        return addOrderHistory(markerOrder);
     }
 
     // Cancel an order from the order book
@@ -227,13 +245,16 @@ public class OrderBook {
 
     public Order getOrder(long orderId) {
         Order order = findOrderInBook(limitAskOrders, orderId);
-        if (order != null) return order;
+        if (order != null)
+            return order;
 
         order = findOrderInBook(limitBidOrders, orderId);
-        if (order != null) return order;
+        if (order != null)
+            return order;
 
         order = findOrderInBook(stopAskOrders, orderId);
-        if (order != null) return order;
+        if (order != null)
+            return order;
 
         return findOrderInBook(stopBidOrders, orderId);
     }
@@ -247,3 +268,5 @@ public class OrderBook {
             }
         }
         return null;
+    }
+}

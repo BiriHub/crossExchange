@@ -254,8 +254,6 @@ public class CrossClientMain {
                 type, "size", size, "price", price));
         output.println(request);
 
-         = System.currentTimeMillis(); // Update the user session timestamp
-
         // Response parsing
         String response = input.readLine();
         JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();

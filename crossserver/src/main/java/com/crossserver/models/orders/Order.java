@@ -1,29 +1,24 @@
 package com.crossserver.models.orders;
 
-public class Order {
-    private static long orderIdCounter = 0; // Order ID counter
-    private final long orderId;
-    private final String type; // Order type: bid or ask
-    private final String orderType; // Order type: limit, market or stop 
-    private long size; // Order size
-    private final long price; // Order price 
-    private final long timestamp; // Order timestamp
-    private final long userId; // User ID
-    private boolean isClosed; // Order status
+public abstract class Order {
+    protected final long orderId;
+    protected final String type; // Order type: bid or ask
+    protected long size; // Order size
+    protected String orderType; // Order type: market,limit or stop   
+    protected final long price; // Order price: the price at which the order has been closed, for market orders it is the price at which the order has been matched and for limit/stop orders it is the price at which the order has been closed
+    protected long timestamp; // Order timestamp: when the order has been closed
+    // TODO: ask teacher if the order needs also the timestamp when it has been
+    // created
+    private String userId; // User ID
 
-    // Constructor to read the order from the database
-    public Order(long orderId, String type, String orderType, long size, long price, long timestamp, long userId) {
+    // Constructor to read the order from the order history teacher format
+    public Order(long orderId, String type, long size, long price) {
         this.orderId = orderId;
         this.type = type;
-        this.orderType = orderType;
         this.size = size;
         this.price = price;
-        this.timestamp = timestamp;
-        this.userId = userId;
-    }
-
-    public Order(String type, String orderType, long size, long price, long timestamp, long userId) {
-        this(++orderIdCounter, type, orderType, size, price, timestamp, userId);
+        this.timestamp = 0;
+        this.orderType=""; // default value for a generic order
     }
 
     public long getOrderId() {
@@ -34,12 +29,12 @@ public class Order {
         return type;
     }
 
-    public String getOrderType() {
-        return orderType;
-    }
-
     public long getSize() {
         return size;
+    }
+
+    public void setSize(long size) {
+        this.size = size;
     }
 
     public long getPrice() {
@@ -49,18 +44,26 @@ public class Order {
     public long getTimestamp() {
         return timestamp;
     }
-    
-    public long getUserId() {
+
+    public void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public String getUserId() {
         return userId;
     }
-    public boolean isClosed() {
-        return isClosed;
+
+    public void setUserId(String userId) {
+        this.userId = userId;
     }
-    public void setClosed(boolean isClosed) {
-        this.isClosed = isClosed;
+
+    public String getOrderType() {
+        return orderType;
     }
-    public void setSize(long size) {
-        this.size = size;
+
+    public boolean isExecuted() {
+        return timestamp != 0;
     }
-    
+
+
 }

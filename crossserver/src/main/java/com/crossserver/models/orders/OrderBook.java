@@ -5,30 +5,25 @@ import java.util.Map.Entry;
 import java.util.concurrent.*;
 
 public class OrderBook {
-    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> askBook; // sell
-    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> bidBook; // buy
+    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> limitAskOrders; // sell
+    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> limitBidOrders; // buy
     private final ConcurrentLinkedQueue<Order> orderHistory; // order history
 
     private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> stopBidOrders;
     private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> stopAskOrders;
 
     public OrderBook() {
-        this.askBook = new ConcurrentSkipListMap<>();
-        this.bidBook = new ConcurrentSkipListMap<>(Comparator.reverseOrder());
+        this.limitAskOrders = new ConcurrentSkipListMap<>();
+        this.limitBidOrders = new ConcurrentSkipListMap<>(Comparator.reverseOrder());
         this.orderHistory = new ConcurrentLinkedQueue<>();
         this.stopBidOrders = new ConcurrentSkipListMap<>();
         this.stopAskOrders = new ConcurrentSkipListMap<>();
     }
 
-    // Add an order to the order book
-    private void addAskOrder(Order order) {
-        askBook.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
-    }
-
     public void insertStopOrder(Order order) {
-        if (order.getType().equals("buy")) {
+        if (order.getType().equals("bid")) {
             stopBidOrders.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
-        } else if (order.getType().equals("sell")) {
+        } else if (order.getType().equals("ask")) {
             stopAskOrders.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
         }
     }
@@ -38,7 +33,11 @@ public class OrderBook {
         stopBidOrders.headMap(currentPrice, true).forEach((price, queue) -> {
             while (!queue.isEmpty()) {
                 Order stopOrder = queue.poll();
-                insertLimitOrder(stopOrder); // Create a limit order
+                MarketOrder marketOrder = new MarketOrder(stopOrder.getOrderId(), stopOrder.getType(),
+                        stopOrder.getSize(),
+                        currentPrice);
+
+                insertMarketOrder(marketOrder.getOrderId(), marketOrder.getType(), marketOrder.getSize(),stopOrder.getUserId());
             }
             stopBidOrders.remove(price); // Remove the stop order
         });
@@ -53,35 +52,37 @@ public class OrderBook {
         });
     }
 
-    public void insertLimitOrder(Order order) {
+    // Insert a limit order in the order book according to its type (bid or ask),
+    // return the order ID
+    public long insertLimitOrder(Order order) {
         if (order.getType().equals("bid"))
-            addBidOrder(order);
+            // Add a new bid order to the limit order
+            limitBidOrders.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
         else
-            addAskOrder(order);
+            // Add an ask order to the limit order book
+            limitAskOrders.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
+
+        return order.getOrderId();
     }
 
-    // Aggiunge un ordine di acquisto
-    private void addBidOrder(Order order) {
-        bidBook.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
-    }
-
-    public long insertMarketOrder(String type, long size, long timestamp, long userId) {
+    // Execute a market order
+    public long insertMarketOrder(long orderId, String type, long size, long userId) {
         if (type.equals("bid"))
-            return matchAskOrder(type, size, timestamp, userId);
+            return matchBidOrder(orderId, type, size, userId);
         else
-            return matchBidOrder(type, size, timestamp, userId);
+            return matchAskOrder(orderId, type, size, userId);
     }
 
     // Esegue un ordine di acquisto contro il book di vendita
     // TODO : to test
-    public long matchBidOrder(String type, long size, long timestamp, long userId) {
+    public long matchBidOrder(long orderId, String type, long size, long userId) {
         long remainingSize = size;
-        long executedOrderPrice = 0;
+        long executedOrderPrice = 0; // price of the first executed order, it will be the price of the market order
         boolean assigned = false; // flag to check if the price has been assigned to the order
 
         // Copy the ask book in order to save the original state of the book in case of
         // impossibility to fulfill the order
-        ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> temp = new ConcurrentSkipListMap<>(askBook);
+        ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> temp = new ConcurrentSkipListMap<>(limitAskOrders);
 
         for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
             long price = entry.getKey();
@@ -89,25 +90,22 @@ public class OrderBook {
 
             while (!queue.isEmpty() && remainingSize > 0) {
                 Order askOrder = queue.peek(); // TODO peek or poll?
-                long orderSize = askOrder.getSize();
-                long tradeSize = Math.min(orderSize, remainingSize);
+                long tradeSize = Math.min(askOrder.getSize(), remainingSize);
 
                 // Reduce the size of the ask order
-                orderSize -= tradeSize;
                 remainingSize -= tradeSize;
 
                 // Simulate the matching
-                askOrder.setSize(orderSize); // Reduce the size of the ask order
+                askOrder.setSize(askOrder.getSize() - tradeSize); // Reduce the size of the ask order
 
-                if (orderSize > 0) {
-                    queue.poll(); // extra the executed order back in the queue
+                if (askOrder.getSize() == 0) {
+                    queue.poll(); // extract the executed order back in the queue
                     // TODO: add the users notification automatic sending operation for the limit
                     // orders
                 }
-
+                // Activate stop orders when the price changes
+                activateStopOrders(price);
             }
-            if (remainingSize == 0)
-                break;
 
             // Assign the price of the executed order only once
             // TODO: temporary solution, the price of the last executed order is assigned to
@@ -115,8 +113,10 @@ public class OrderBook {
             if (!assigned) {
                 executedOrderPrice = price;
                 assigned = true;
-                activateStopOrders(executedOrderPrice); // Attivazione degli stop order
             }
+
+            if (remainingSize == 0)
+                break;
 
         }
 
@@ -127,11 +127,12 @@ public class OrderBook {
         // TODO RIPRENDI DA QUA PER IL CALCOLO DEL PREZZO MEDIO FINALE DI ESECUZIONE
         // DELL'MARKET ORDER
 
-        // Apply changes from temp to askBook
-        for (var entry : temp.entrySet()) {
-            askBook.put(entry.getKey(), entry.getValue());
+        // Apply changes from temp to limitAskOrders
+        for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
+            limitAskOrders.put(entry.getKey(), entry.getValue());
         }
-        Order markerOrder = new Order(type, "market", size, executedOrderPrice, timestamp, userId);
+
+        MarketOrder markerOrder = new MarketOrder(orderId, type, size, executedOrderPrice);
         // TODO: add the market order to the order history
         return addOrderHistory(markerOrder);
     }
@@ -144,14 +145,14 @@ public class OrderBook {
 
     // Execute a sell order against the buy book
     // TODO : to test
-    public long matchAskOrder(String type, long size, long timestamp, long userId) {
+    public long matchAskOrder(String type, long size, long userId) {
         long remainingSize = size;
         long executedOrderPrice = 0;
         boolean assigned = false; // flag to check if the price has been assigned to the order
 
         // Copy the bid book in order to save the original state of the book in case of
         // impossibility to fulfill the order
-        ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> temp = new ConcurrentSkipListMap<>(bidBook);
+        ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> temp = new ConcurrentSkipListMap<>(limitBidOrders);
 
         for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
             long price = entry.getKey();
@@ -179,7 +180,7 @@ public class OrderBook {
             }
             if (remainingSize == 0)
                 break;
-                
+
             if (!assigned) {
                 executedOrderPrice = price;
                 assigned = true;
@@ -192,9 +193,9 @@ public class OrderBook {
             return -1; // Error, the order cannot be fulfilled
         }
 
-        // Apply changes from temp to bidBook
+        // Apply changes from temp to limitBidOrders
         for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
-            bidBook.put(entry.getKey(), entry.getValue());
+            limitBidOrders.put(entry.getKey(), entry.getValue());
         }
 
         Order marketOrder = new Order(type, "market", size, executedOrderPrice, timestamp, userId);
@@ -203,9 +204,9 @@ public class OrderBook {
 
     // Cancel an order from the order book
     public long cancelOrder(long orderId) {
-        if (cancelOrderFromBook(askBook, orderId))
+        if (cancelOrderFromBook(limitAskOrders, orderId))
             return orderId;
-        if (cancelOrderFromBook(bidBook, orderId))
+        if (cancelOrderFromBook(limitBidOrders, orderId))
             return orderId;
         if (cancelOrderFromBook(stopAskOrders, orderId))
             return orderId;
@@ -225,10 +226,10 @@ public class OrderBook {
     }
 
     public Order getOrder(long orderId) {
-        Order order = findOrderInBook(askBook, orderId);
+        Order order = findOrderInBook(limitAskOrders, orderId);
         if (order != null) return order;
 
-        order = findOrderInBook(bidBook, orderId);
+        order = findOrderInBook(limitBidOrders, orderId);
         if (order != null) return order;
 
         order = findOrderInBook(stopAskOrders, orderId);

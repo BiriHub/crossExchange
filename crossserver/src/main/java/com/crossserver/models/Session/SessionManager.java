@@ -13,7 +13,7 @@ public class SessionManager {
         startSessionMonitor();
     }
 
-    // Save user session 
+    // Save user session
     public void loginUser(String username) {
         sessionMap.put(username, System.currentTimeMillis());
         // System.out.println("User " + username + "has been logged in");
@@ -31,11 +31,12 @@ public class SessionManager {
     }
 
     // Update user activity
-    public void updateUserActivity(String username) {
-        if (sessionMap.containsKey(username)) {
-            sessionMap.put(username, System.currentTimeMillis());
-            // System.out.println("User " + username + " activity updated");
-        }
+    public long updateUserActivity(String username) {
+        long currentTime = System.currentTimeMillis();
+        if (!sessionMap.containsKey(username))
+            return -1;
+        sessionMap.put(username, currentTime);
+        return currentTime;
     }
 
     // Monitor user each user session
@@ -45,7 +46,7 @@ public class SessionManager {
             sessionMap.entrySet().removeIf(entry -> {
                 if (currentTime - entry.getValue() > sessionTimeout) {
                     System.out.println("User " + entry.getKey() + " has been removed due to inactivity");
-                    return true; 
+                    return true;
                 }
                 return false;
             });

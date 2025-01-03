@@ -11,6 +11,7 @@ import java.lang.reflect.Type;
 
 import com.crossserver.models.*;
 import com.crossserver.models.Session.SessionManager;
+import com.crossserver.models.orders.LimitOrder;
 import com.crossserver.models.orders.Order;
 import com.crossserver.models.orders.OrderBook;
 import com.google.gson.*;
@@ -37,6 +38,10 @@ public class CrossServerMain {
     private final ConcurrentMap<String, UserHandler> activeUserConnections; // Active user connections
 
     private final OrderBook orderBook;
+    private static long orderIdCounter = 0; // Order ID counter
+    // TODO: when the server is started, the order ID counter must be initialized
+    // with the last order ID from the order history, require to modify the
+    // loadDatabases method
 
     private ServerSocket serverSocket; // Server socket
     private int serverPort; // Server port
@@ -290,31 +295,31 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
 
-    // Gestione Limit Order
-    // public String handleLimitOrder(JsonObject request) {
-    public String handleLimitOrder(JsonObject request) {
+    // Manage limit order request
+    public String handleLimitOrderRequest(JsonObject request) {
         if (!request.has("type") || !request.has("size") || !request.has("price")
                 || !request.has("userId")) {
-            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
+            return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
 
         String type = request.get("type").getAsString();
+        long size = request.get("size").getAsLong();
+        long price = request.get("price").getAsLong();
 
-        if (!type.equals("bid") && !type.equals("ask")) {
+        if ((!type.equals("bid") && !type.equals("ask"))
+                || size <= 0 || price <= 0) {
             return gson.toJson(Map.of("orderID", -1)); // error
         }
 
         // limit order creation
-        String orderType = "limit";
-        long size = request.get("size").getAsLong();
-        long price = request.get("price").getAsLong();
-        long timestamp = request.get("timestamp").getAsLong();
-        long userId = request.get("userId").getAsLong();
+        String userId = request.get("userId").getAsString();
 
-        Order order = new Order(type, orderType, size, price, timestamp, userId);
+        LimitOrder order = new LimitOrder(orderIdCounter++, type, size, price);
+        order.setUserId(userId);
 
-        orderBook.insertLimitOrder(order);
-        return gson.toJson(Map.of("orderID", order.getUserId())); // error
+        orderBook.insertLimitOrder(order); // insert the order in the order book
+        long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
+        return gson.toJson(Map.of("orderID", order.getOrderId(), "newUserSession", updatedUserSessionTime));
     }
 
     // Gestione Market Order (placeholder)
@@ -324,16 +329,18 @@ public class CrossServerMain {
         }
 
         String type = request.get("type").getAsString();
-        if (!type.equals("bid") && !type.equals("ask")) {
+
+        // market order creation
+        long size = request.get("size").getAsLong();
+        String userId = request.get("userId").getAsString();
+
+        if ((!type.equals("bid") && !type.equals("ask"))
+                || size <= 0) {
             return gson.toJson(Map.of("orderID", -1)); // error
         }
 
-        // market order creation
-        String orderType = "market";
-        long size = request.get("size").getAsLong();
-        long timestamp = request.get("timestamp").getAsLong();
-        long userId = request.get("userId").getAsLong();
-        lond executedOrderid = orderBook.insertMarketOrder(type, size, timestamp, userId);
+        long executedOrderid = orderBook.insertMarketOrder(orderIdCounter++, type, size, userId);
+        sessionManager.updateUserActivity(userId); // update user activity
         return gson.toJson(Map.of("orderID", executedOrderid)); // error
 
     }

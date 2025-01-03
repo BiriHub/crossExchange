@@ -169,12 +169,12 @@ public class CrossClientMain {
     // Check if the user is logged in
     // da verificare se è davvero necessaria localmente
     public boolean amIlogged() {
-        return (System.currentTimeMillis() - userSessionTimestamp) < maxLoginTime;
+        return (System.currentTimeMillis() - userSessionTimestamp) < maxLoginTime && usernameLoggedIn != null;
     }
 
     // Logout
     private void logout(BufferedReader console) throws IOException {
-        if (!amIlogged() || usernameLoggedIn == null) {
+        if (!amIlogged()) {
             System.out.println("[!] Server response code: 101 - user not logged in"); // locally check if the user is
                                                                                       // logged in and print the message
                                                                                       // instead of sending the request
@@ -195,6 +195,139 @@ public class CrossClientMain {
             }
             System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
 
+        }
+    }
+
+    // Insert limit order
+    private void insertLimitOrder(BufferedReader console) throws IOException {
+        if (!amIlogged()) {
+            System.out.println("[!] orderId: -1"); // the user is not logged in
+            return;
+        }
+        String type;
+        long size = 0;
+        long price = 0;
+
+        do {
+            System.out.print("Select the order type (ask/bid): ");
+            System.out.println("1. Ask");
+            System.out.println("2. Bid");
+            type = console.readLine();
+            switch (type) {
+                case "1":
+                    type = "ask";
+                    break;
+                case "2":
+                    type = "bid";
+                    break;
+                default:
+                    System.out.println("Command not recognized.Please select a valid type.");
+            }
+
+        } while ((!type.equals("ask") && !type.equals("bid")) || type.isEmpty());
+
+        do {
+            System.out.print("Size: ");
+            try {
+                size = Long.parseLong(console.readLine());
+                if (size <= 0) {
+                    System.out.println("Size must be a positive number.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a valid number.");
+            }
+        } while (size <= 0);
+
+        do {
+            System.out.print("Price: ");
+            try {
+                price = Long.parseLong(console.readLine());
+                if (price <= 0) {
+                    System.out.println("Price must be a positive number.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a valid number.");
+            }
+        } while (price <= 0);
+
+        String request = gson.toJson(Map.of("operation", "insertLimitOrder", "username", usernameLoggedIn, "type",
+                type, "size", size, "price", price));
+        output.println(request);
+
+         = System.currentTimeMillis(); // Update the user session timestamp
+
+        // Response parsing
+        String response = input.readLine();
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+        if (jsonResponse.has("orderId") && jsonResponse.has("newUserSession")) {
+            int orderId = jsonResponse.get("orderId").getAsInt();
+            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            System.out.println("[!] orderId: " + orderId);
+        }
+    }
+
+    private void insertMarketOrder(BufferedReader console) throws IOException {
+
+        if (!amIlogged()) {
+            System.out.println("[!] orderId: -1"); // the user is not logged in
+            return;
+        }
+        String type;
+        long size = 0;
+        long price = 0;
+
+        do {
+            System.out.print("Select the order type (ask/bid): ");
+            System.out.println("1. Ask");
+            System.out.println("2. Bid");
+            type = console.readLine();
+            switch (type) {
+                case "1":
+                    type = "ask";
+                    break;
+                case "2":
+                    type = "bid";
+                    break;
+                default:
+                    System.out.println("Command not recognized.Please select a valid type.");
+            }
+
+        } while ((!type.equals("ask") && !type.equals("bid")) || type.isEmpty());
+
+        do {
+            System.out.print("Size: ");
+            try {
+                size = Long.parseLong(console.readLine());
+                if (size <= 0) {
+                    System.out.println("Size must be a positive number.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a valid number.");
+            }
+        } while (size <= 0);
+
+        do {
+            System.out.print("Price: ");
+            try {
+                price = Long.parseLong(console.readLine());
+                if (price <= 0) {
+                    System.out.println("Price must be a positive number.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a valid number.");
+            }
+        } while (price <= 0);
+
+        String request = gson.toJson(Map.of("operation", "insertMarketOrder", "username", usernameLoggedIn, "type",
+                type, "size", size, "price", price));
+        output.println(request);
+
+        // Response parsing
+        String response = input.readLine();
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+        if (jsonResponse.has("orderId")) {
+            int orderId = jsonResponse.get("orderId").getAsInt();
+            System.out.println("[!] orderId: " + orderId);
         }
     }
 

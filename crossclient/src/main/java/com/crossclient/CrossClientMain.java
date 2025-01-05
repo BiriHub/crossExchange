@@ -181,7 +181,7 @@ public class CrossClientMain {
                                                                                       // to the server
             return;
         }
-        output.println(Map.of("operation", "logout", "username", usernameLoggedIn));
+        output.println(Map.of("operation", "logout", "userId", usernameLoggedIn));
 
         // Response parsing
         String response = input.readLine();
@@ -250,7 +250,7 @@ public class CrossClientMain {
             }
         } while (price <= 0);
 
-        String request = gson.toJson(Map.of("operation", "insertLimitOrder", "username", usernameLoggedIn, "type",
+        String request = gson.toJson(Map.of("operation", "insertLimitOrder", "userId", usernameLoggedIn, "type",
                 type, "size", size, "price", price));
         output.println(request);
 
@@ -316,16 +316,118 @@ public class CrossClientMain {
             }
         } while (price <= 0);
 
-        String request = gson.toJson(Map.of("operation", "insertMarketOrder", "username", usernameLoggedIn, "type",
+        String request = gson.toJson(Map.of("operation", "insertMarketOrder", "userId", usernameLoggedIn, "type",
                 type, "size", size, "price", price));
         output.println(request);
 
         // Response parsing
         String response = input.readLine();
         JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-        if (jsonResponse.has("orderId")) {
+        if (jsonResponse.has("orderId") && jsonResponse.has("newUserSession")) {
             int orderId = jsonResponse.get("orderId").getAsInt();
+            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
             System.out.println("[!] orderId: " + orderId);
+        }
+    }
+
+    private void insertStopOrder(BufferedReader console) throws IOException {
+        if (!amIlogged()) {
+            System.out.println("[!] orderId: -1"); // the user is not logged in
+            return;
+        }
+        String type;
+        long size = 0;
+        long price = 0;
+
+        do {
+            System.out.print("Select the order type (ask/bid): ");
+            System.out.println("1. Ask");
+            System.out.println("2. Bid");
+            type = console.readLine();
+            switch (type) {
+                case "1":
+                    type = "ask";
+                    break;
+                case "2":
+                    type = "bid";
+                    break;
+                default:
+                    System.out.println("Command not recognized. Please select a valid type.");
+            }
+
+        } while ((!type.equals("ask") && !type.equals("bid")) || type.isEmpty());
+
+        do {
+            System.out.print("Size: ");
+            try {
+                size = Long.parseLong(console.readLine());
+                if (size <= 0) {
+                    System.out.println("Size must be a positive number.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a valid number.");
+            }
+        } while (size <= 0);
+
+        do {
+            System.out.print("Price: ");
+            try {
+                price = Long.parseLong(console.readLine());
+                if (price <= 0) {
+                    System.out.println("Price must be a positive number.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a valid number.");
+            }
+        } while (price <= 0);
+
+        String request = gson.toJson(Map.of("operation", "insertStopOrder", "userId", usernameLoggedIn, "type", type,
+                "size", size, "price", price));
+        output.println(request);
+
+        // Response parsing
+        String response = input.readLine();
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+        if (jsonResponse.has("orderId") && jsonResponse.has("newUserSession")) {
+            int orderId = jsonResponse.get("orderId").getAsInt();
+            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            System.out.println("[!] orderId: " + orderId);
+        }
+    }
+
+    // Cancel order
+    private void cancelOrder(BufferedReader console) throws IOException {
+        if (!amIlogged()) {
+            System.out.println("[!] orderId: -1"); // the user is not logged in
+            return;
+        }
+
+        int orderId = 0;
+        do {
+            System.out.print("Order ID: ");
+            try {
+                orderId = Integer.parseInt(console.readLine());
+                if (orderId <= 0)
+                    System.out.println("Error: order ID must be a positive number.");
+
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter a valid number.");
+            }
+        } while (orderId <= 0);
+
+        String request = gson
+                .toJson(Map.of("operation", "cancelOrder", "userId", usernameLoggedIn, "orderId", orderId));
+        output.println(request);
+
+        // Response parsing
+        String response = input.readLine();
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+        if (jsonResponse.has("response") && jsonResponse.has("errorMessage") && jsonResponse.has("newUserSession")) {
+            int responseCode = jsonResponse.get("response").getAsInt();
+            String errorMessage = jsonResponse.get("errorMessage").getAsString();
+            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
+
         }
     }
 
@@ -372,7 +474,7 @@ public class CrossClientMain {
                 System.out.println("3. Insert stop order");
                 System.out.println("4. Cancel order");
                 System.out.println("5. Price history");
-                System.out.println("6. Logout");
+                System.out.println("6. Change user/logout");
                 System.out.println("7. Close the application");
                 System.out.println("\n-------------");
                 command = console.readLine();
@@ -411,7 +513,7 @@ public class CrossClientMain {
             client.connectToServer();
             client.start();
         } catch (IOException e) {
-            System.err.println("Errore nell'avvio del client: " + e.getMessage());
+            System.err.println("Client start on failure: " + e.getMessage());
         }
     }
 

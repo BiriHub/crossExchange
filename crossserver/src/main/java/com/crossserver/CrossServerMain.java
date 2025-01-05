@@ -14,6 +14,7 @@ import com.crossserver.models.Session.SessionManager;
 import com.crossserver.models.orders.LimitOrder;
 import com.crossserver.models.orders.Order;
 import com.crossserver.models.orders.OrderBook;
+import com.crossserver.models.orders.StopOrder;
 import com.google.gson.*;
 import com.google.gson.internal.bind.MapTypeAdapterFactory;
 import com.google.gson.reflect.TypeToken;
@@ -323,7 +324,7 @@ public class CrossServerMain {
     }
 
     // Gestione Market Order (placeholder)
-    public String handleMarketOrder(JsonObject request) {
+    public String handleMarketOrderRequest(JsonObject request) {
         if (!request.has("type") || !request.has("size") || !request.has("userId")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
@@ -339,49 +340,52 @@ public class CrossServerMain {
             return gson.toJson(Map.of("orderID", -1)); // error
         }
 
+        // insert the order in the order book and return its identifier
         long executedOrderid = orderBook.insertMarketOrder(orderIdCounter++, type, size, userId);
-        sessionManager.updateUserActivity(userId); // update user activity
-        return gson.toJson(Map.of("orderID", executedOrderid)); // error
+
+        long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
+        return gson.toJson(Map.of("orderID", executedOrderid, "newUserSession", updatedUserSessionTime));
 
     }
 
-    public String handleStopOrder(JsonObject request) {
+    public String handleStopOrderRequest(JsonObject request) {
         if (!request.has("type") || !request.has("size") || !request.has("price") || !request.has("userId")) {
-            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
-        }
-
-        String type = request.get("type").getAsString();
-        if (!type.equals("buy") && !type.equals("sell")) {
             return gson.toJson(Map.of("orderID", -1)); // Errore
         }
 
-        String orderType = "stop";
+        String type = request.get("type").getAsString();
         long size = request.get("size").getAsLong();
         long price = request.get("price").getAsLong();
-        long timestamp = request.get("timestamp").getAsLong();
-        long userId = request.get("userId").getAsLong();
+        String userId = request.get("userId").getAsString();
 
-        Order order = new Order(type, orderType, size, price, timestamp, userId);
-        orderBook.insertStopOrder(order);
-        return gson.toJson(Map.of("orderID", order.getOrderId()));
+        if (!type.equals("bid") && !type.equals("ask")) {
+            return gson.toJson(Map.of("orderID", -1)); // Errore
+        }
+
+        // stop order creation
+        StopOrder stopOrder = new StopOrder(orderIdCounter++, type, size, price);
+        stopOrder.setUserId(userId);
+
+        orderBook.insertStopOrder(stopOrder); // insert the order in the order book
+        long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
+        return gson.toJson(Map.of("orderID", stopOrder.getOrderId(), "newUserSession", updatedUserSessionTime));
     }
-
     // Cancellazione ordini (placeholder)
     // TODO to test
     public String cancelOrder(JsonObject request) {
         if (!request.has("orderId") || !request.has("userId")) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
         }
-        long userId = request.get("userId").getAsLong();
+        String userId = request.get("userId").getAsString();
         long orderId = request.get("orderId").getAsLong();
 
         Order order = orderBook.getOrder(orderId);
 
         if (order == null)
-            return gson.toJson(Map.of("response", 101, "errorMessage", "Order not found"));
-        if (order.getUserId() != userId)
-            return gson.toJson(Map.of("response", 101, "errorMessage", "Order belongs to another user"));
-        if (order.isClosed())
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Order does not exist"));
+        if (!order.getUserId().equals(userId))
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Order belongs to different user"));
+        if (order.isExecuted())
             return gson.toJson(Map.of("response", 101, "errorMessage", "Order has been executed"));
 
         orderBook.cancelOrder(orderId);

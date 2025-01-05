@@ -5,12 +5,12 @@ import java.util.Map.Entry;
 import java.util.concurrent.*;
 
 public class OrderBook {
-    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> limitAskOrders; // sell
-    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> limitBidOrders; // buy
+    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitAskOrders; // sell
+    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitBidOrders; // buy
     private final ConcurrentLinkedQueue<Order> orderHistory; // order history
 
-    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> stopBidOrders;
-    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> stopAskOrders;
+    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>> stopBidOrders;
+    private final ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>> stopAskOrders;
 
     public OrderBook() {
         this.limitAskOrders = new ConcurrentSkipListMap<>();
@@ -20,12 +20,14 @@ public class OrderBook {
         this.stopAskOrders = new ConcurrentSkipListMap<>();
     }
 
-    public void insertStopOrder(Order order) {
+    // Insert a stop order in the order book according to its type (bid or ask)
+    public long insertStopOrder(StopOrder order) {
         if (order.getType().equals("bid")) {
             stopBidOrders.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
         } else if (order.getType().equals("ask")) {
             stopAskOrders.computeIfAbsent(order.getPrice(), k -> new ConcurrentLinkedQueue<>()).offer(order);
         }
+        return order.getOrderId();
     }
 
     private void activateStopOrders(long currentPrice) {
@@ -36,14 +38,16 @@ public class OrderBook {
                 MarketOrder marketOrder = new MarketOrder(stopOrder.getOrderId(), stopOrder.getType(),
                         stopOrder.getSize(),
                         currentPrice);
+                marketOrder.setUserId(stopOrder.getUserId());
 
-                long idORdineEvaso = insertMarketOrder(marketOrder.getOrderId(), marketOrder.getType(),
+                long fulfilledOrderId = insertMarketOrder(marketOrder.getOrderId(), marketOrder.getType(),
                         marketOrder.getSize(),
                         stopOrder.getUserId());
-                if (idORdineEvaso != -1) {
-                    // stop order has been executed correttamente
+                if (fulfilledOrderId != -1) {
+                    // stop order has been executed with no errors
                     stopOrder.setTimestamp(System.currentTimeMillis());
                     orderHistory.offer(stopOrder);
+
                 }
             }
             stopBidOrders.remove(price); // Remove the stop order
@@ -56,10 +60,12 @@ public class OrderBook {
                 MarketOrder marketOrder = new MarketOrder(stopOrder.getOrderId(), stopOrder.getType(),
                         stopOrder.getSize(),
                         currentPrice);
-                long idORdineEvaso = insertMarketOrder(marketOrder.getOrderId(), marketOrder.getType(),
+                marketOrder.setUserId(stopOrder.getUserId());
+
+                long fulfilledOrderId = insertMarketOrder(marketOrder.getOrderId(), marketOrder.getType(),
                         marketOrder.getSize(),
                         stopOrder.getUserId());
-                if (idORdineEvaso != -1) {
+                if (fulfilledOrderId != -1) {
                     // stop order has been executed correttamente
                     stopOrder.setTimestamp(System.currentTimeMillis());
                     orderHistory.offer(stopOrder);
@@ -100,14 +106,20 @@ public class OrderBook {
 
         // Copy the ask book in order to save the original state of the book in case of
         // impossibility to fulfill the order
-        ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> temp = new ConcurrentSkipListMap<>(limitAskOrders);
+        ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> temp = new ConcurrentSkipListMap<>(
+                limitAskOrders);
 
-        for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
+        for (Entry<Long, ConcurrentLinkedQueue<LimitOrder>> entry : temp.entrySet()) {
             long price = entry.getKey();
-            ConcurrentLinkedQueue<Order> queue = entry.getValue();
+            ConcurrentLinkedQueue<LimitOrder> queue = entry.getValue();
+
+            if (!assigned) {
+                executedOrderPrice = price;
+                assigned = true;
+            }
 
             while (!queue.isEmpty() && remainingSize > 0) {
-                Order askOrder = queue.peek(); // TODO peek or poll?
+                LimitOrder askOrder = queue.peek(); // TODO peek or poll?
                 long tradeSize = Math.min(askOrder.getSize(), remainingSize);
 
                 // Reduce the size of the ask order
@@ -118,19 +130,14 @@ public class OrderBook {
 
                 if (askOrder.getSize() == 0) {
                     queue.poll(); // extract the executed order back in the queue
+                    askOrder.setTimestamp(System.currentTimeMillis()); // set the moment when the limit order has been
+                                                                       // executed
                     // TODO: add the users notification automatic sending operation for the limit
                     // orders
+                    addOrderHistory(askOrder); // add the limit order to the order history
                 }
                 // Activate stop orders when the price changes
                 activateStopOrders(price);
-            }
-
-            // Assign the price of the executed order only once
-            // TODO: temporary solution, the price of the last executed order is assigned to
-            // the market order
-            if (!assigned) {
-                executedOrderPrice = price;
-                assigned = true;
             }
 
             if (remainingSize == 0)
@@ -146,13 +153,12 @@ public class OrderBook {
         // DELL'MARKET ORDER
 
         // Apply changes from temp to limitAskOrders
-        for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
+        for (Entry<Long, ConcurrentLinkedQueue<LimitOrder>> entry : temp.entrySet()) {
             limitAskOrders.put(entry.getKey(), entry.getValue());
         }
 
         MarketOrder markerOrder = new MarketOrder(orderId, type, size, executedOrderPrice);
         markerOrder.setUserId(userId);
-        // TODO: add the market order to the order history
         return addOrderHistory(markerOrder);
     }
 
@@ -171,11 +177,12 @@ public class OrderBook {
 
         // Copy the bid book in order to save the original state of the book in case of
         // impossibility to fulfill the order
-        ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> temp = new ConcurrentSkipListMap<>(limitBidOrders);
+        ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> temp = new ConcurrentSkipListMap<>(
+                limitBidOrders);
 
-        for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
+        for (Entry<Long, ConcurrentLinkedQueue<LimitOrder>> entry : temp.entrySet()) {
             long price = entry.getKey();
-            ConcurrentLinkedQueue<Order> queue = entry.getValue();
+            ConcurrentLinkedQueue<LimitOrder> queue = entry.getValue();
 
             while (!queue.isEmpty() && remainingSize > 0) {
                 Order bidOrder = queue.peek(); // TODO peek or poll?
@@ -188,9 +195,12 @@ public class OrderBook {
                 bidOrder.setSize(bidOrder.getSize() - tradeSize); // Reduce the size of the bid order
 
                 if (bidOrder.getSize() == 0) {
-                    queue.poll(); // extra the executed order back in the queue
+                    queue.poll(); // extract the executed order back in the queue
+                    bidOrder.setTimestamp(System.currentTimeMillis()); // set the moment when the limit order has been
+                                                                       // executed
                     // TODO: add the users notification automatic sending operation for the limit
                     // orders
+                    addOrderHistory(bidOrder); // add the limit order to the order history
                 }
                 // Assign the price of the executed order only once
                 activateStopOrders(price);
@@ -211,7 +221,7 @@ public class OrderBook {
         }
 
         // Apply changes from temp to limitBidOrders
-        for (Entry<Long, ConcurrentLinkedQueue<Order>> entry : temp.entrySet()) {
+        for (Entry<Long, ConcurrentLinkedQueue<LimitOrder>> entry : temp.entrySet()) {
             limitBidOrders.put(entry.getKey(), entry.getValue());
         }
 
@@ -230,12 +240,13 @@ public class OrderBook {
             return orderId;
         if (cancelOrderFromBook(stopBidOrders, orderId))
             return orderId;
-        return orderId;
+        return -1; // Return -1 if the order was not found in any book
     }
 
-    // TODO : to test
-    private boolean cancelOrderFromBook(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> book, long orderId) {
-        for (ConcurrentLinkedQueue<Order> queue : book.values()) {
+    private boolean cancelOrderFromBook(
+            ConcurrentSkipListMap<Long, ? extends ConcurrentLinkedQueue<? extends Order>> book, long orderId) {
+
+        for (ConcurrentLinkedQueue<? extends Order> queue : book.values()) {
             if (queue.removeIf(order -> order.getOrderId() == orderId)) {
                 return true;
             }
@@ -258,9 +269,10 @@ public class OrderBook {
 
         return findOrderInBook(stopBidOrders, orderId);
     }
-
-    private Order findOrderInBook(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<Order>> book, long orderId) {
-        for (ConcurrentLinkedQueue<Order> queue : book.values()) {
+ // Find an order in the specified data structure given its ID , return the order if found, null otherwise
+    private Order findOrderInBook(ConcurrentSkipListMap<Long, ? extends ConcurrentLinkedQueue<? extends Order>> book,
+            long orderId) {
+        for (ConcurrentLinkedQueue<? extends Order> queue : book.values()) {
             for (Order order : queue) {
                 if (order.getOrderId() == orderId) {
                     return order;

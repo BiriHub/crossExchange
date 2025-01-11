@@ -392,9 +392,41 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK")); // order has been deleted
     }
 
-    // public String getPriceHistory(JsonObject request) {
+    public String getPriceHistory(JsonObject request) {
+        if (!request.has("month") || !request.has("userId")) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
+        }
+        if (request.get("month").getAsString().length() != 6) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid month format"));
+        }
+        String userId = request.get("userId").getAsString();
 
-    // }
+        String month = request.get("month").getAsString().substring(0, 2);
+        int year = Integer.parseInt(request.get("month").getAsString().substring(2));
+        Calendar currCalendar = Calendar.getInstance();
+        int currentYear = currCalendar.get(Calendar.YEAR);
+        int currentMonth = currCalendar.get(Calendar.MONTH) + 1;
+        int monthToInt = Integer.parseInt(month);
+
+        if (monthToInt < 1 || monthToInt > 12)
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid month format"));
+        else if (year > currentYear)
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid year format"));
+        else if (year == currentYear && monthToInt > currentMonth)
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid month value"));
+
+        LocalDate startOfMonth = LocalDate.of(year, monthToInt, 1);
+        LocalDate endOfMonth = startOfMonth.plusMonths(1).minusDays(1);
+        long startOfMonthSeconds = startOfMonth.atStartOfDay().toEpochSecond(java.time.ZoneOffset.UTC);
+        long endOfMonthSeconds = endOfMonth.atStartOfDay().toEpochSecond(java.time.ZoneOffset.UTC);
+        ConcurrentSkipListMap<String, TradeHistory> orderHistory = orderBook.getOrderHistory(startOfMonthSeconds,
+                endOfMonthSeconds);
+        long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
+
+        return gson
+                .toJson(Map.of("newUserSession", updatedUserSessionTime, "month", month, "tradeHistory", orderHistory));
+    }
+
     public static void main(String[] args) {
         try {
             CrossServerMain server = new CrossServerMain();

@@ -431,6 +431,91 @@ public class CrossClientMain {
         }
     }
 
+    /*
+     * Get the list of fulfilled orders
+     */
+    private void getPriceHistory(BufferedReader console) throws IOException {
+        if (!amIlogged()) {
+            System.out.println("[!] Server response code: 101 - user not logged in"); // locally check if the user is
+                                                                                      // logged in and print the message
+                                                                                      // instead of sending the request
+                                                                                      // to the server
+            return;
+        }
+
+        String line;
+
+        boolean validInput = false;
+        Calendar currCalendar = Calendar.getInstance();
+        int currentYear = currCalendar.get(Calendar.YEAR);
+        int currentMonth = currCalendar.get(Calendar.MONTH) + 1;
+        do {
+            System.out.print("Select month and year in the format (MMYYYY): ");
+            line = console.readLine();
+            if (line.isEmpty() || line.length() != 6) {
+                System.out.println("Invalid input. Please enter a valid month and year in the format MMYYYY.");
+                continue;
+            }
+            try {
+                int monthValue = Integer.parseInt(line.substring(0, 2));
+                int yearValue = Integer.parseInt(line.substring(2));
+                if (monthValue < 1 || monthValue > 12)
+                    System.out.println("Invalid month. Please enter a month between 01 and 12.");
+                else if (yearValue > currentYear)
+                    System.out.println("Invalid year. Please enter a year less than or equal to the current year.");
+                else if (yearValue == currentYear && monthValue > currentMonth)
+                    System.out.println("Invalid month. Please enter a month less than or equal to the current month.");
+                else
+                    validInput = true;
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid input. Please enter numeric values for month and year.");
+            }
+        } while (!validInput);
+
+        String request = gson.toJson(
+                Map.of("operation", "getPriceHistory", "values", Map.of("month", line, "userId", usernameLoggedIn)));
+
+        output.println(request);
+        // Response parsing
+        String response = input.readLine();
+        JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
+        if (jsonResponse.has("response") && jsonResponse.has("errorMessage") && jsonResponse.has("newUserSession")) {
+            int responseCode = jsonResponse.get("response").getAsInt();
+            String errorMessage = jsonResponse.get("errorMessage").getAsString();
+            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
+
+        } else if (jsonResponse.has("month") && jsonResponse.has("tradeHistory")
+                && jsonResponse.has("newUserSession")) {
+
+            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            String month = jsonResponse.get("month").getAsString();
+            JsonArray tradeHistory = jsonResponse.get("tradeHistory").getAsJsonArray();
+
+            System.out.println("Price history for month " + month + ":");
+            for (JsonElement trade : tradeHistory) {
+                JsonObject tradeObj = trade.getAsJsonObject();
+                System.out.println("Day: " + tradeObj.get("day").getAsString());
+                System.out.println("Opening price: " + tradeObj.get("openingPrice").getAsString());
+                System.out.println("Closing price: " + tradeObj.get("closingPrice").getAsString());
+                System.out.println("Highest price: " + tradeObj.get("highestPrice").getAsString());
+                System.out.println("Lowest price: " + tradeObj.get("lowestPrice").getAsString());
+                System.out.println("Fulfilled orders: ");
+                JsonArray fulfilledOrders = tradeObj.get("fulfilledOrders").getAsJsonArray();
+                for (JsonElement order : fulfilledOrders) {
+                    JsonObject orderObj = order.getAsJsonObject();
+                    System.out.println("Order ID: " + orderObj.get("orderId").getAsString());
+                    System.out.println("Type: " + orderObj.get("type").getAsString());
+                    System.out.println("Size: " + orderObj.get("size").getAsString());
+                    System.out.println("Price: " + orderObj.get("price").getAsString());
+                    System.out.println("Timestamp: " + orderObj.get("timestamp").getAsString());
+                    System.out.println("-------------");
+                }
+            }
+
+        }
+    }
+
     // Menu principale
     public void start() {
         try (BufferedReader console = new BufferedReader(new InputStreamReader(System.in))) {

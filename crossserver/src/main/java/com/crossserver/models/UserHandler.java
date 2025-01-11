@@ -32,7 +32,7 @@ public class UserHandler implements Runnable {
 
             String request;
             while (!Thread.currentThread().isInterrupted() && (request = input.readLine()) != null) {
-                System.out.println("Richiesta ricevuta: " + request);
+                System.out.println("Client request received: " + request);
                 JsonObject jsonRequest = gson.fromJson(request, JsonObject.class);
                 String response = handleRequest(jsonRequest);
                 output.println(response);
@@ -43,44 +43,42 @@ public class UserHandler implements Runnable {
             try {
                 socket.close();
             } catch (IOException e) {
-                System.err.println("Errore nella chiusura della connessione: " + e.getMessage());
+                System.err.println("Error while closing the connection: " + e.getMessage());
             }
         }
     }
 
     private String handleRequest(JsonObject request) {
         try {
-            // TODO finish to complete the handle request
-            // TODO complete
             if (!request.has("operation")) {
-                return gson.toJson("{\"response\":103, \"errorMessage\": \"Operation not found \"}");
+                return gson.toJson(Map.of("response",103,"errorMessage","Missing parameter"));
             }
             String operation = request.get("operation").getAsString();
 
             switch (operation) {
-                case "register": // Registrazione
+                case "register": // register
                     return server.register(request);
-                case "updateCredentials": // Aggiornamento credenziali
+                case "updateCredentials": // update credentials
                     return server.updateCredentials(request);
-                case "login": // Login
+                case "login": // Login 
                     return server.login(request, this);
                 case "logout": // Logout
                     return server.logout(request,this);
-                // case "3": // Inserimento Limit Order
-                //     return handleLimitOrder(request);
-                // case "4": // Inserimento Market Order
-                //     return handleMarketOrder(request);
-                // case "5": // Inserimento Stop Order
-                //     return handleStopOrder(request);
-                // case "6": // Cancellazione Ordine
-                //     return cancelOrder(request);
-                // case "7": // Storico Prezzi
-                //     return getPriceHistory(request);
-                default:
-                    return gson.toJson(Map.of("response", -1, "errorMessage", "Operazione non riconosciuta"));
+                case "3": // add limit order
+                    return server.handleLimitOrderRequest(request);
+                case "4": // add market order
+                    return server.handleMarketOrderRequest(request);
+                case "5": // add stop order
+                    return server.handleStopOrderRequest(request);
+                case "6": // cancel order
+                    return server.cancelOrder(request);
+                case "7": // get order book history
+                    return server.getPriceHistory(request);
+                default: // error
+                    return gson.toJson(Map.of("response", -1, "errorMessage", "Operation not recognized"));
             }
         } catch (Exception e) {
-            return gson.toJson(Map.of("response", -1, "errorMessage", "Errore interno del server: " + e.getMessage()));
+            return gson.toJson(Map.of("response", -1, "errorMessage", "Internal server error: " + e.getMessage()));
         }
     }
 

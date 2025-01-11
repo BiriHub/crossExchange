@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import java.lang.reflect.Type;
 
 import com.crossserver.models.*;
@@ -15,6 +16,7 @@ import com.crossserver.models.orders.LimitOrder;
 import com.crossserver.models.orders.Order;
 import com.crossserver.models.orders.OrderBook;
 import com.crossserver.models.orders.StopOrder;
+import com.crossserver.models.orders.TradeHistory;
 import com.google.gson.*;
 import com.google.gson.internal.bind.MapTypeAdapterFactory;
 import com.google.gson.reflect.TypeToken;
@@ -26,6 +28,8 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.Timestamp;
+import java.time.LocalDate;
+import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -39,7 +43,7 @@ public class CrossServerMain {
     private final ConcurrentMap<String, UserHandler> activeUserConnections; // Active user connections
 
     private final OrderBook orderBook;
-    private static long orderIdCounter = 0; // Order ID counter
+    private static AtomicLong orderIdCounter; // Order ID counter
     // TODO: when the server is started, the order ID counter must be initialized
     // with the last order ID from the order history, require to modify the
     // loadDatabases method
@@ -60,6 +64,7 @@ public class CrossServerMain {
         gson = new Gson();
         orderBook = new OrderBook();
         activeUserConnections = new ConcurrentHashMap<>();
+        orderIdCounter = new AtomicLong(0);
         threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         loadDatabases(USERS_DB);
         // Save the state of the server when it is shut down
@@ -95,9 +100,9 @@ public class CrossServerMain {
 
     private void saveDatabases(String filename) {
         // Load the user database
-        try (Writer writer = new FileWriter(filename)) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filename))) {
             gson.toJson(usersDB, writer);
-            // System.out.println("State saved successfully to " + filename);
+
         } catch (IOException e) {
             System.err.println("Error saving database state of registered users to file: " + e.getMessage());
         }
@@ -151,12 +156,18 @@ public class CrossServerMain {
 
     // Registrazione utente
     public String register(JsonObject request) {
-        if (!request.has("username") || !request.has("password")) {
+
+        if (!request.has("operation") || !request.has("values")) {
+            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
+        }
+        JsonObject values = request.get("values").getAsJsonObject();
+
+        if (!values.has("username") || !values.has("password")) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
         }
 
-        String username = request.get("username").getAsString();
-        String password = request.get("password").getAsString();
+        String username = values.get("username").getAsString();
+        String password = values.get("password").getAsString();
 
         if (username.isEmpty() || password.isEmpty()) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "User parameter not found"));
@@ -194,12 +205,18 @@ public class CrossServerMain {
     // Update user credentials
     // tested and working
     public String updateCredentials(JsonObject request) {
-        if (!request.has("username") || !request.has("old_password") || !request.has("new-password")) {
+        if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("response", 105, "errorMessage", "Missing parameters"));
         }
-        String username = request.get("username").getAsString();
-        String oldPassword = request.get("old_password").getAsString();
-        String newPassword = request.get("new-password").getAsString();
+
+        JsonObject values = request.get("values").getAsJsonObject();
+
+        if (!values.has("username") || !values.has("old_password") || !values.has("new-password")) {
+            return gson.toJson(Map.of("response", 105, "errorMessage", "Missing parameters"));
+        }
+        String username = values.get("username").getAsString();
+        String oldPassword = values.get("old_password").getAsString();
+        String newPassword = values.get("new-password").getAsString();
 
         String user_password = usersDB.get(username);
 
@@ -230,12 +247,18 @@ public class CrossServerMain {
     // User login
     // tested and working
     public String login(JsonObject request, UserHandler activeConnection) {
-        if (!request.has("username") || !request.has("password")) {
+
+        if (!request.has("operation") || !request.has("values")) {
+            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
+        }
+        JsonObject values = request.get("values").getAsJsonObject();
+
+        if (!values.has("username") || !values.has("password")) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
         }
 
-        String username = request.get("username").getAsString();
-        String password = request.get("password").getAsString();
+        String username = values.get("username").getAsString();
+        String password = values.get("password").getAsString();
 
         String storedPassword = usersDB.get(username);
         String checkPassword = hashPassword(password);
@@ -268,10 +291,15 @@ public class CrossServerMain {
     // tested and working
     public String logout(JsonObject request, UserHandler activeConnection) {
 
+        if (!request.has("operation") || !request.has("values")) {
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
+        }
+        JsonObject values = request.get("values").getAsJsonObject();
+
         if (!request.has("username")) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
         }
-        String username = request.get("username").getAsString();
+        String username = values.get("username").getAsString();
 
         // Check if the username corresponds to the current active connection
         if (!activeConnection.equals(activeUserConnections.get(username))) {
@@ -298,14 +326,19 @@ public class CrossServerMain {
 
     // Manage limit order request
     public String handleLimitOrderRequest(JsonObject request) {
-        if (!request.has("type") || !request.has("size") || !request.has("price")
-                || !request.has("userId")) {
+        if (!request.has("operation") || !request.has("values")) {
+            return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
+        }
+        JsonObject values = request.get("values").getAsJsonObject();
+
+        if (!values.has("type") || !values.has("size") || !values.has("price")
+                || !values.has("userId")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
 
-        String type = request.get("type").getAsString();
-        long size = request.get("size").getAsLong();
-        long price = request.get("price").getAsLong();
+        String type = values.get("type").getAsString();
+        long size = values.get("size").getAsLong();
+        long price = values.get("price").getAsLong();
 
         if ((!type.equals("bid") && !type.equals("ask"))
                 || size <= 0 || price <= 0) {
@@ -313,9 +346,9 @@ public class CrossServerMain {
         }
 
         // limit order creation
-        String userId = request.get("userId").getAsString();
+        String userId = values.get("userId").getAsString();
 
-        LimitOrder order = new LimitOrder(orderIdCounter++, type, size, price);
+        LimitOrder order = new LimitOrder(orderIdCounter.getAndIncrement(), type, size, price);
         order.setUserId(userId);
 
         orderBook.insertLimitOrder(order); // insert the order in the order book
@@ -325,15 +358,20 @@ public class CrossServerMain {
 
     // Gestione Market Order (placeholder)
     public String handleMarketOrderRequest(JsonObject request) {
-        if (!request.has("type") || !request.has("size") || !request.has("userId")) {
+        if (!request.has("operation") || !request.has("values")) {
+            return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
+        }
+        JsonObject values = request.get("values").getAsJsonObject();
+
+        if (!values.has("type") || !values.has("size") || !values.has("userId")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
 
-        String type = request.get("type").getAsString();
+        String type = values.get("type").getAsString();
 
         // market order creation
-        long size = request.get("size").getAsLong();
-        String userId = request.get("userId").getAsString();
+        long size = values.get("size").getAsLong();
+        String userId = values.get("userId").getAsString();
 
         if ((!type.equals("bid") && !type.equals("ask"))
                 || size <= 0) {
@@ -341,7 +379,7 @@ public class CrossServerMain {
         }
 
         // insert the order in the order book and return its identifier
-        long executedOrderid = orderBook.insertMarketOrder(orderIdCounter++, type, size, userId);
+        long executedOrderid = orderBook.insertMarketOrder(orderIdCounter.getAndIncrement(), type, size, userId);
 
         long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
         return gson.toJson(Map.of("orderID", executedOrderid, "newUserSession", updatedUserSessionTime));
@@ -349,35 +387,46 @@ public class CrossServerMain {
     }
 
     public String handleStopOrderRequest(JsonObject request) {
-        if (!request.has("type") || !request.has("size") || !request.has("price") || !request.has("userId")) {
+        if (!request.has("operation") || !request.has("values")) {
+            return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
+        }
+        JsonObject values = request.get("values").getAsJsonObject();
+
+        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId")) {
             return gson.toJson(Map.of("orderID", -1)); // Errore
         }
 
-        String type = request.get("type").getAsString();
-        long size = request.get("size").getAsLong();
-        long price = request.get("price").getAsLong();
-        String userId = request.get("userId").getAsString();
+        String type = values.get("type").getAsString();
+        long size = values.get("size").getAsLong();
+        long price = values.get("price").getAsLong();
+        String userId = values.get("userId").getAsString();
 
         if (!type.equals("bid") && !type.equals("ask")) {
             return gson.toJson(Map.of("orderID", -1)); // Errore
         }
 
         // stop order creation
-        StopOrder stopOrder = new StopOrder(orderIdCounter++, type, size, price);
+        StopOrder stopOrder = new StopOrder(orderIdCounter.getAndIncrement(), type, size, price);
         stopOrder.setUserId(userId);
 
         orderBook.insertStopOrder(stopOrder); // insert the order in the order book
         long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
         return gson.toJson(Map.of("orderID", stopOrder.getOrderId(), "newUserSession", updatedUserSessionTime));
     }
+
     // Cancellazione ordini (placeholder)
     // TODO to test
     public String cancelOrder(JsonObject request) {
-        if (!request.has("orderId") || !request.has("userId")) {
+        if (!request.has("operation") || !request.has("values")) {
+            return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
+        }
+        JsonObject values = request.get("values").getAsJsonObject();
+
+        if (!values.has("orderId") || !values.has("userId")) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
         }
-        String userId = request.get("userId").getAsString();
-        long orderId = request.get("orderId").getAsLong();
+        String userId = values.get("userId").getAsString();
+        long orderId = values.get("orderId").getAsLong();
 
         Order order = orderBook.getOrder(orderId);
 
@@ -393,16 +442,21 @@ public class CrossServerMain {
     }
 
     public String getPriceHistory(JsonObject request) {
-        if (!request.has("month") || !request.has("userId")) {
+        if (!request.has("operation") || !request.has("values")) {
+            return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
+        }
+        JsonObject values = request.get("values").getAsJsonObject();
+
+        if (!values.has("month") || !values.has("userId")) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
         }
-        if (request.get("month").getAsString().length() != 6) {
+        if (values.get("month").getAsString().length() != 6) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid month format"));
         }
-        String userId = request.get("userId").getAsString();
+        String userId = values.get("userId").getAsString();
 
-        String month = request.get("month").getAsString().substring(0, 2);
-        int year = Integer.parseInt(request.get("month").getAsString().substring(2));
+        String month = values.get("month").getAsString().substring(0, 2);
+        int year = Integer.parseInt(values.get("month").getAsString().substring(2));
         Calendar currCalendar = Calendar.getInstance();
         int currentYear = currCalendar.get(Calendar.YEAR);
         int currentMonth = currCalendar.get(Calendar.MONTH) + 1;

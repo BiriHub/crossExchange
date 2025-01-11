@@ -18,7 +18,6 @@ import com.crossserver.models.orders.OrderBook;
 import com.crossserver.models.orders.StopOrder;
 import com.crossserver.models.orders.TradeHistory;
 import com.google.gson.*;
-import com.google.gson.internal.bind.MapTypeAdapterFactory;
 import com.google.gson.reflect.TypeToken;
 
 import java.net.InetAddress;
@@ -38,11 +37,15 @@ public class CrossServerMain {
 
     private static final String CONFIG_FILE = "server.properties"; // Configuration file
     private static final String USERS_DB = "users.json"; // User database file
+    private static final String ORDER_HISTORY_DB = "orderHistoryDB.json"; // order history database file
+    private static final String LIMIT_ORDER_DB = "limitDB.json"; // not executed limit order database file
+    private static final String STOP_ORDER_DB = "stopDB.json"; // not executed stop order database file
 
-    private final ConcurrentMap<String, String> usersDB; // User database : username, encrypPassword
-    private final ConcurrentMap<String, UserHandler> activeUserConnections; // Active user connections
 
-    private final OrderBook orderBook;
+    // private final ConcurrentMap<String, UserHandler> activeUserConnections; //
+    // Active user connections
+
+    private OrderBook orderBook;
     private static AtomicLong orderIdCounter; // Order ID counter
     // TODO: when the server is started, the order ID counter must be initialized
     // with the last order ID from the order history, require to modify the
@@ -50,9 +53,10 @@ public class CrossServerMain {
 
     private ServerSocket serverSocket; // Server socket
     private int serverPort; // Server port
-    private long max_sessionTime; // Maximum user session time
+    private long maxSessionTime; // Maximum user session time
 
     private final ExecutorService threadPool;
+    private long maxThreadPoolTerminationTime;
     private final SessionManager sessionManager;
     private final Gson gson;
 
@@ -60,18 +64,44 @@ public class CrossServerMain {
         // Load the default configuration and connect to the server
         loadConfiguration();
         usersDB = new ConcurrentHashMap<>();
-        sessionManager = new SessionManager(max_sessionTime);
+        sessionManager = new SessionManager(maxSessionTime);
         gson = new Gson();
         orderBook = new OrderBook();
-        activeUserConnections = new ConcurrentHashMap<>();
+        // activeUserConnections = new ConcurrentHashMap<>();
         orderIdCounter = new AtomicLong(0);
         threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         loadDatabases(USERS_DB);
+
         // Save the state of the server when it is shut down
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             saveDatabases(USERS_DB);
+
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                System.err.println("[!] Error while closing the server socket: " + e.getMessage());
+            }
+
+            // thread pool shutdown
+            threadPool.shutdown();
+            try {
+                if (!threadPool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                    threadPool.shutdownNow();
+                    if (!threadPool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                        System.err.println("[!] Thread pool did not terminate");
+                    }
+                }
+            } catch (InterruptedException e) {
+                threadPool.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+
             System.out.println("Server state saved successfully");
         }));
+    }
+
+    public SessionManager getSessionManager() {
+        return sessionManager;
     }
 
     /*
@@ -83,10 +113,13 @@ public class CrossServerMain {
             Properties config = new Properties();
             config.load(configFileStream);
             serverPort = Integer.parseInt(config.getProperty("port")); // extract the port from the configuration file
-            max_sessionTime = Long.parseLong(config.getProperty("sessionTime")); // extract the maximum session time
-                                                                                 // from the configuration file
+            maxSessionTime = Long.parseLong(config.getProperty("sessionTime")); // extract the maximum session time
+                                                                                // from the configuration file
             String serverAddress = config.getProperty("address"); // extract the server address from the configuration
                                                                   // file
+            // extract the maximum thread pool size from the configuration file
+            maxThreadPoolTerminationTime = Long.parseLong(config.getProperty("threadPoolTerminationTime"));
+
             serverSocket = new ServerSocket(serverPort, 0, InetAddress.getByName(serverAddress)); //
 
         } catch (NullPointerException e) {
@@ -96,32 +129,179 @@ public class CrossServerMain {
             System.err.println("Error while reading configuration file: " + e.getMessage());
             System.exit(1);
         }
+
+    private void saveDatabases() {
+        // Save the user database
+        saveToFile(USERS_DB, usersDB);
+        // Save the order history
+        saveToFile(ORDER_HISTORY_DB, Map.of("orderIdCounter", orderIdCounter, "trades", orderBook.getOrderHistory()));
+        // Save the limit orders (bid and ask)
+        saveToFile(LIMIT_ORDER_DB, Map.of("limitAskOrders", orderBook.getLimitAskOrders(), "limitBidOrders",
+                orderBook.getLimitBidOrders()));
+        // Save the stop orders (bid and ask)
+        saveToFile(STOP_ORDER_DB,
+                Map.of("stopAskOrders", orderBook.getStopAskOrders(), "stopBidOrders", orderBook.getStopBidOrders()));
     }
 
-    private void saveDatabases(String filename) {
-        // Load the user database
+    private void saveToFile(String filename, Map<String, ?> data) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(filename))) {
-            gson.toJson(usersDB, writer);
-
+            gson.toJson(data, writer);
         } catch (IOException e) {
-            System.err.println("Error saving database state of registered users to file: " + e.getMessage());
+            System.err.println("Error saving data to file: " + e.getMessage());
         }
-
     }
 
     private void loadDatabases(String filename) {
         // Save the user database
+        loadUserDB(USERS_DB);
+        // Save the order history
+        loadOrderHistory(ORDER_HISTORY_DB);
+        // Save the limit orders (bid and ask)
+        loadLimitOrders(LIMIT_ORDER_DB);
+        // Save the stop orders (bid and ask)
+        loadStopOrders(STOP_ORDER_DB);
+    }
 
+    private void loadUserDB(String filename) {
         try (Reader reader = new FileReader(filename)) {
             Type type = new TypeToken<Map<String, String>>() {
             }.getType();
             Map<String, String> map = gson.fromJson(reader, type);
             if (map != null) {
                 usersDB.putAll(map); // copy data to the usersDB
-                // System.out.println("State loaded successfully from " + filename);
+                System.out.println("State loaded successfully from " + filename);
             }
         } catch (FileNotFoundException e) {
-            System.out.println("No previous state file found, starting fresh.");
+            System.out.println("[Configuration loading] No previous state file found, starting fresh.");
+        } catch (IOException e) {
+            System.err.println("Error loading state from file: " + e.getMessage());
+        }
+    }
+
+    private void loadOrderHistory(String filename) {
+        try (Reader reader = new FileReader(filename)) {
+
+            Type type = new TypeToken<Map<String, Object>>() {
+            }.getType();
+
+            Map<String, Object> map = gson.fromJson(reader, type);
+
+            if (map != null) {
+                // set the order id counter
+                if (map.containsKey("orderIdCounter")) {
+                    orderIdCounter = new AtomicLong((long) map.get("orderIdCounter"));
+                }
+
+                // update the order history book
+                if (map.containsKey("orderHistory")) {
+                    // convert the JSON array of trades into a list of orders
+                    Type orderListType = new TypeToken<List<Order>>() {
+                    }.getType();
+                    List<Order> orderList = gson.fromJson(gson.toJson(map.get("trades")), orderListType);
+
+                    // set the order history of the order book
+                    ConcurrentLinkedQueue<Order> orderHistory = new ConcurrentLinkedQueue<>(orderList);
+                    orderBook.setOrderHistory(orderHistory);
+                }
+
+                System.out.println("State loaded successfully from " + filename);
+            }
+        } catch (FileNotFoundException e) {
+            System.out.println("[Configuration loading] No previous state file found, starting fresh.");
+            orderIdCounter = new AtomicLong(0);
+            orderBook = new OrderBook();
+        } catch (IOException e) {
+            System.err.println("Error loading state from file: " + e.getMessage());
+        } catch (Exception e) {
+            System.err.println("Unexpected error while loading state: " + e.getMessage());
+        }
+    }
+
+    private void loadLimitOrders(String filename) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
+            Type type = new TypeToken<Map<String, Object>>() {
+            }.getType();
+            Map<String, Object> map = gson.fromJson(reader, type);
+
+            if (map != null) {
+
+                // load the limit ask orders
+                if (map.containsKey("limitAskOrders")) {
+                    Type orderListType = new TypeToken<List<LimitOrder>>() {
+                    }.getType();
+                    List<LimitOrder> limitAskOrdersFromJsonFile = gson.fromJson(gson.toJson(map.get("limitAskOrders")),
+                            orderListType);
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitAskOrders = new ConcurrentSkipListMap<>();
+                    for (LimitOrder order : limitAskOrdersFromJsonFile) {
+                        limitAskOrders.putIfAbsent(order.getPrice(), new ConcurrentLinkedQueue<LimitOrder>())
+                                .offer(order);
+                    }
+                    orderBook.setLimitAskOrders(limitAskOrders);
+                }
+
+                // load the limit bid orders
+                if (map.containsKey("limitBidOrders")) {
+                    Type orderListType = new TypeToken<List<LimitOrder>>() {
+                    }.getType();
+                    List<LimitOrder> limitBidOrdersFromJsonFile = gson.fromJson(gson.toJson(map.get("limitBidOrders")),
+                            orderListType);
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitBidOrders = new ConcurrentSkipListMap<>();
+                    for (LimitOrder order : limitBidOrdersFromJsonFile) {
+                        limitBidOrders.putIfAbsent(order.getPrice(), new ConcurrentLinkedQueue<LimitOrder>())
+                                .offer(order);
+                    }
+                    orderBook.setLimitBidOrders(limitBidOrders);
+                }
+
+                System.out.println("State loaded successfully from " + filename);
+            }
+        } catch (FileNotFoundException e) {
+            System.out.println("[Configuration loading] No previous state file found, starting fresh.");
+        } catch (IOException e) {
+            System.err.println("Error loading state from file: " + e.getMessage());
+        }
+    }
+
+    private void loadStopOrders(String filename) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
+            Type type = new TypeToken<Map<String, Object>>() {
+            }.getType();
+            Map<String, Object> map = gson.fromJson(reader, type);
+
+            if (map != null) {
+
+                // load the stop ask orders
+                if (map.containsKey("stopAskOrders")) {
+                    Type orderListType = new TypeToken<List<StopOrder>>() {
+                    }.getType();
+                    List<StopOrder> stopAskOrdersFromJsonFile = gson.fromJson(gson.toJson(map.get("stopAskOrders")),
+                            orderListType);
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>> stopAskOrders = new ConcurrentSkipListMap<>();
+                    for (StopOrder order : stopAskOrdersFromJsonFile) {
+                        stopAskOrders.putIfAbsent(order.getPrice(), new ConcurrentLinkedQueue<StopOrder>())
+                                .offer(order);
+                    }
+                    orderBook.setStopAskOrders(stopAskOrders);
+                }
+
+                // load the stop bid orders
+                if (map.containsKey("stopBidOrders")) {
+                    Type orderListType = new TypeToken<List<StopOrder>>() {
+                    }.getType();
+                    List<StopOrder> stopBidOrdersFromJsonFile = gson.fromJson(gson.toJson(map.get("stopBidOrders")),
+                            orderListType);
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>> stopBidOrders = new ConcurrentSkipListMap<>();
+                    for (StopOrder order : stopBidOrdersFromJsonFile) {
+                        stopBidOrders.putIfAbsent(order.getPrice(), new ConcurrentLinkedQueue<StopOrder>())
+                                .offer(order);
+                    }
+                    orderBook.setStopBidOrders(stopBidOrders);
+                }
+
+                System.out.println("State loaded successfully from " + filename);
+            }
+        } catch (FileNotFoundException e) {
+            System.out.println("[Configuration loading] No previous state file found, starting fresh.");
         } catch (IOException e) {
             System.err.println("Error loading state from file: " + e.getMessage());
         }
@@ -244,17 +424,26 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response", 100, "errorMessage", "Password updated successfully"));
     }
 
-    // User login
-    // tested and working
-    public String login(JsonObject request, UserHandler activeConnection) {
+    /*
+     * User login
+     * the method returns a map containing the response code, the error message and
+     * the maximum user session which will be forwarded to the client, moreover it
+     * saves the username for let the server "UserHandler" to manage the user
+     * connection and update the server when something happends to the user
+     * connection.
+     * The "UserHandler" will send the response to the client according to the
+     * format in the
+     */
+
+    public Map<String, Object> login(JsonObject request, UserHandler activeConnection) {
 
         if (!request.has("operation") || !request.has("values")) {
-            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
+            return Map.of("response", 103, "errorMessage", "Missing parameters");
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
         if (!values.has("username") || !values.has("password")) {
-            return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
+            return Map.of("response", 103, "errorMessage", "Missing parameters");
         }
 
         String username = values.get("username").getAsString();
@@ -265,26 +454,26 @@ public class CrossServerMain {
 
         // check if the user exists
         if (password == null) {
-            return gson.toJson(Map.of("response", 101, "errorMessage", "Non existent username"));
+            return Map.of("response", 101, "errorMessage", "Non existent username");
         }
 
         // check if the user is already logged in
         if (sessionManager.isUserLoggedIn(username)) {
-            return gson.toJson(Map.of("response", 102, "errorMessage", "User already logged in"));
+            return Map.of("response", 102, "errorMessage", "User already logged in");
         }
 
         // check if the password is correct
         if (!storedPassword.equals(checkPassword)) {
-            return gson.toJson(Map.of("response", 101, "errorMessage", "Username/password mismatch"));
+            return Map.of("response", 101, "errorMessage", "Username/password mismatch");
         }
 
         // Start user session
         sessionManager.loginUser(username);
 
-        // Save the user connection
-        activeUserConnections.put(username, activeConnection);
+        // // Save the user connection
+        // activeUserConnections.put(username, activeConnection);
 
-        return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
+        return Map.of("userId", username, "session", maxSessionTime, "response", 100, "errorMessage", "OK");
     }
 
     // Logout
@@ -301,10 +490,11 @@ public class CrossServerMain {
         }
         String username = values.get("username").getAsString();
 
-        // Check if the username corresponds to the current active connection
-        if (!activeConnection.equals(activeUserConnections.get(username))) {
-            return gson.toJson(Map.of("response", 101, "errorMessage", "Username/connection mismatch"));
-        }
+        // // Check if the username corresponds to the current active connection
+        // if (!activeConnection.equals(activeUserConnections.get(username))) {
+        // return gson.toJson(Map.of("response", 101, "errorMessage",
+        // "Username/connection mismatch"));
+        // }
 
         // check if the user is already logged in
         if (!sessionManager.isUserLoggedIn(username)) {
@@ -319,7 +509,10 @@ public class CrossServerMain {
         if (!sessionManager.isUserLoggedIn(username)) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "User is not logged in"));
         }
-        activeUserConnections.remove(username);
+
+        // logout the user
+        sessionManager.logoutUser(username);
+        // activeUserConnections.remove(username);
 
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }

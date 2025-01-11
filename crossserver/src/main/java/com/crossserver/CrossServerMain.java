@@ -7,6 +7,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.lang.reflect.Type;
 
@@ -40,16 +42,16 @@ public class CrossServerMain {
     private static final String ORDER_HISTORY_DB = "orderHistoryDB.json"; // order history database file
     private static final String LIMIT_ORDER_DB = "limitDB.json"; // not executed limit order database file
     private static final String STOP_ORDER_DB = "stopDB.json"; // not executed stop order database file
+    private final ScheduledExecutorService DBpersistenceExecutor; // Database persistence executor: used to save the
+                                                                  // databases periodically
 
+    private final ConcurrentMap<String, String> usersDB; // User database : username, encrypted password
 
     // private final ConcurrentMap<String, UserHandler> activeUserConnections; //
     // Active user connections
 
     private OrderBook orderBook;
     private static AtomicLong orderIdCounter; // Order ID counter
-    // TODO: when the server is started, the order ID counter must be initialized
-    // with the last order ID from the order history, require to modify the
-    // loadDatabases method
 
     private ServerSocket serverSocket; // Server socket
     private int serverPort; // Server port
@@ -57,6 +59,8 @@ public class CrossServerMain {
 
     private final ExecutorService threadPool;
     private long maxThreadPoolTerminationTime;
+    private long periodicallySaveDB;
+
     private final SessionManager sessionManager;
     private final Gson gson;
 
@@ -70,38 +74,53 @@ public class CrossServerMain {
         // activeUserConnections = new ConcurrentHashMap<>();
         orderIdCounter = new AtomicLong(0);
         threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-        loadDatabases(USERS_DB);
+        DBpersistenceExecutor = Executors.newSingleThreadScheduledExecutor();
+        loadDatabases();
 
         // Save the state of the server when it is shut down
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            saveDatabases(USERS_DB);
-
+            // close the server socket
             try {
                 serverSocket.close();
             } catch (IOException e) {
                 System.err.println("[!] Error while closing the server socket: " + e.getMessage());
             }
 
+            // close the database persistence executor
+            DBpersistenceExecutor.shutdownNow();
+
             // thread pool shutdown
             threadPool.shutdown();
             try {
-                if (!threadPool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                if (!threadPool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS))
+
                     threadPool.shutdownNow();
-                    if (!threadPool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)) {
-                        System.err.println("[!] Thread pool did not terminate");
-                    }
-                }
             } catch (InterruptedException e) {
                 threadPool.shutdownNow();
-                Thread.currentThread().interrupt();
             }
-
+            // save the server state before shutting down
+            saveDatabases();
             System.out.println("Server state saved successfully");
+            Thread.currentThread().interrupt();
         }));
     }
 
     public SessionManager getSessionManager() {
         return sessionManager;
+    }
+
+    /*
+     * Periodically save the server databases
+     */
+    public void startPeriodicPersistence() {
+        DBpersistenceExecutor.scheduleAtFixedRate(() -> {
+            try {
+                saveDatabases();
+            } catch (Exception e) {
+                System.err.println("[ERROR] Periodic persistence failed: " + e.getMessage());
+            }
+        }, periodicallySaveDB * 2, periodicallySaveDB, TimeUnit.SECONDS); // execute the task every "periodicallySaveDB"
+                                                                          // seconds according the configuration file
     }
 
     /*
@@ -119,6 +138,7 @@ public class CrossServerMain {
                                                                   // file
             // extract the maximum thread pool size from the configuration file
             maxThreadPoolTerminationTime = Long.parseLong(config.getProperty("threadPoolTerminationTime"));
+            periodicallySaveDB = Long.parseLong(config.getProperty("intervalSaveDB"));
 
             serverSocket = new ServerSocket(serverPort, 0, InetAddress.getByName(serverAddress)); //
 
@@ -129,7 +149,14 @@ public class CrossServerMain {
             System.err.println("Error while reading configuration file: " + e.getMessage());
             System.exit(1);
         }
+    }
 
+    /*
+     * Save the server databases: the user database, the order history, the limit
+     * orders and the stop orders.
+     * The information are saved in JSON format periodically and when the server is
+     * preparing to shut down
+     */
     private void saveDatabases() {
         // Save the user database
         saveToFile(USERS_DB, usersDB);
@@ -151,7 +178,12 @@ public class CrossServerMain {
         }
     }
 
-    private void loadDatabases(String filename) {
+    /*
+     * Load the server databases: the user database, the order history, the limit
+     * orders and the stop orders.
+     * The information are loaded from the JSON files when the server is started
+     */
+    private void loadDatabases() {
         // Save the user database
         loadUserDB(USERS_DB);
         // Save the order history
@@ -267,9 +299,7 @@ public class CrossServerMain {
             Type type = new TypeToken<Map<String, Object>>() {
             }.getType();
             Map<String, Object> map = gson.fromJson(reader, type);
-
             if (map != null) {
-
                 // load the stop ask orders
                 if (map.containsKey("stopAskOrders")) {
                     Type orderListType = new TypeToken<List<StopOrder>>() {
@@ -328,6 +358,7 @@ public class CrossServerMain {
     // start the server
     public void start() throws IOException {
         System.out.println("[!] Server started on port " + serverPort + ". Address: " + serverSocket.getInetAddress());
+
         while (true) {
             Socket clientSocket = serverSocket.accept();
             threadPool.execute(new UserHandler(clientSocket, this));

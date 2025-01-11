@@ -5,6 +5,7 @@ import java.net.*;
 
 import com.google.gson.*;
 
+import java.util.Calendar;
 import java.util.Map;
 import java.util.Properties;
 
@@ -81,8 +82,8 @@ public class CrossClientMain {
         System.out.print("Password: ");
         String password = console.readLine();
 
-        String request = gson.toJson(Map.of("operation", "register", "username", username, "password", password));
-        System.out.println("Richista creata: " + request);
+        String request = gson.toJson(Map.of("operation", "register", "values", Map.of("username", username, "password",
+                password)));
         output.println(request);
 
         // Response parsing
@@ -106,8 +107,8 @@ public class CrossClientMain {
             String currentPassword = console.readLine();
             System.out.print("New password: ");
             String newPassword = console.readLine();
-            String request = gson.toJson(Map.of("operation", "updateCredentials", "username", username, "old_password",
-                    currentPassword, "new-password", newPassword));
+            String request = gson.toJson(Map.of("operation", "updateCredentials", "values",
+                    Map.of("username", username, "currentPassword", currentPassword, "newPassword", newPassword)));
             output.println(request);
 
             // Response parsing
@@ -135,7 +136,8 @@ public class CrossClientMain {
             System.out.print("Password: ");
             String password = console.readLine();
 
-            String request = gson.toJson(Map.of("operation", "login", "username", username, "password", password));
+            String request = gson.toJson(Map.of("operation", "login", "values",
+                    Map.of("username", username, "password", password)));
             output.println(request);
 
             // Response parsing
@@ -166,8 +168,7 @@ public class CrossClientMain {
 
     }
 
-    // Check if the user is logged in
-    // da verificare se è davvero necessaria localmente
+    // Check if the user is logged in instead of sending the request to the server
     public boolean amIlogged() {
         return (System.currentTimeMillis() - userSessionTimestamp) < maxLoginTime && usernameLoggedIn != null;
     }
@@ -181,7 +182,8 @@ public class CrossClientMain {
                                                                                       // to the server
             return;
         }
-        output.println(Map.of("operation", "logout", "userId", usernameLoggedIn));
+
+        output.println(Map.of("operation", "logout", "values", Map.of("userId", usernameLoggedIn)));
 
         // Response parsing
         String response = input.readLine();
@@ -250,8 +252,8 @@ public class CrossClientMain {
             }
         } while (price <= 0);
 
-        String request = gson.toJson(Map.of("operation", "insertLimitOrder", "userId", usernameLoggedIn, "type",
-                type, "size", size, "price", price));
+        String request = gson.toJson(Map.of("operation", "insertLimitOrder", "values", Map.of("userId", usernameLoggedIn,
+                "type", type, "size", size, "price", price)));
         output.println(request);
 
         // Response parsing
@@ -316,8 +318,8 @@ public class CrossClientMain {
             }
         } while (price <= 0);
 
-        String request = gson.toJson(Map.of("operation", "insertMarketOrder", "userId", usernameLoggedIn, "type",
-                type, "size", size, "price", price));
+        String request = gson.toJson(Map.of("operation", "insertMarketOrder", "values", Map.of("userId", usernameLoggedIn,
+                "type", type, "size", size)));
         output.println(request);
 
         // Response parsing
@@ -381,8 +383,8 @@ public class CrossClientMain {
             }
         } while (price <= 0);
 
-        String request = gson.toJson(Map.of("operation", "insertStopOrder", "userId", usernameLoggedIn, "type", type,
-                "size", size, "price", price));
+        String request = gson.toJson(Map.of("operation", "insertStopOrder", "values", Map.of("userId", usernameLoggedIn,
+                "type", type, "size", size, "price", price)));
         output.println(request);
 
         // Response parsing
@@ -416,7 +418,7 @@ public class CrossClientMain {
         } while (orderId <= 0);
 
         String request = gson
-                .toJson(Map.of("operation", "cancelOrder", "userId", usernameLoggedIn, "orderId", orderId));
+                .toJson(Map.of("operation", "cancelOrder", "values", Map.of("userId", usernameLoggedIn, "orderId", orderId)));
         output.println(request);
 
         // Response parsing
@@ -476,6 +478,7 @@ public class CrossClientMain {
                 Map.of("operation", "getPriceHistory", "values", Map.of("month", line, "userId", usernameLoggedIn)));
 
         output.println(request);
+
         // Response parsing
         String response = input.readLine();
         JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
@@ -580,14 +583,28 @@ public class CrossClientMain {
 
     // Gestione dei comandi
     private void handleCommand(String command, BufferedReader console) throws IOException {
-        switch (command) { // TODO : add the operations
-            case "1" -> insertLimitOrder(console);
-            case "2" -> insertMarketOrder(console);
-            case "3" -> insertStopOrder(console);
-            case "4" -> cancelOrder(console);
-            case "5" -> getPriceHistory(console);
-            case "6" -> logout(console);
-            default -> System.out.println("Command not recognized.Please select a valid operation.");
+        switch (command) {
+            case "1":
+                insertLimitOrder(console);
+                break;
+            case "2":
+                insertMarketOrder(console);
+                break;
+            case "3":
+                insertStopOrder(console);
+                break;
+            case "4":
+                cancelOrder(console);
+                break;
+            case "5":
+                getPriceHistory(console);
+                break;
+            case "6":
+                logout(console);
+                break;
+            default:
+                System.out.println("Command not recognized.Please select a valid operation.");
+                break;
         }
     }
 

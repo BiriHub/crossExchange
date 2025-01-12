@@ -592,13 +592,13 @@ public class CrossServerMain {
     }
 
     // Gestione Market Order (placeholder)
-    public String handleMarketOrderRequest(JsonObject request) {
+    public String handleMarketOrderRequest(JsonObject request, Socket clientSocket) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
-        if (!values.has("type") || !values.has("size") || !values.has("userId")) {
+        if (!values.has("type") || !values.has("size") || !values.has("userId") || !values.has("udpPort")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
 
@@ -612,6 +612,10 @@ public class CrossServerMain {
                 || size <= 0) {
             return gson.toJson(Map.of("orderID", -1)); // error
         }
+        int udpPort = values.get("udpPort").getAsInt();
+
+        // Register the user's UDP port for notifications
+        notifier.registerUdpClient(userId, clientSocket.getInetAddress(), udpPort);
 
         // insert the order in the order book and return its identifier
         long executedOrderid = orderBook.insertMarketOrder(orderIdCounter.getAndIncrement(), type, size, userId);
@@ -621,13 +625,14 @@ public class CrossServerMain {
 
     }
 
-    public String handleStopOrderRequest(JsonObject request) {
+    public String handleStopOrderRequest(JsonObject request, Socket clientSocket) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
-        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId")) {
+        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId")
+                || !values.has("udpPort")) {
             return gson.toJson(Map.of("orderID", -1)); // Errore
         }
 
@@ -639,6 +644,10 @@ public class CrossServerMain {
         if (!type.equals("bid") && !type.equals("ask")) {
             return gson.toJson(Map.of("orderID", -1)); // Errore
         }
+        int udpPort = values.get("udpPort").getAsInt();
+
+        // Register the user's UDP port for notifications
+        notifier.registerUdpClient(userId, clientSocket.getInetAddress(), udpPort);
 
         // stop order creation
         StopOrder stopOrder = new StopOrder(orderIdCounter.getAndIncrement(), type, size, price);

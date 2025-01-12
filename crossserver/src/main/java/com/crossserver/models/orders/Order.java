@@ -1,11 +1,13 @@
-package com.crossserver.models.orders;
+package com.crossserver.models.Orders;
 
 public abstract class Order {
     protected final long orderId;
     protected final String type; // Order type: bid or ask
     protected long size; // Order size
-    protected String orderType; // Order type: market,limit or stop   
-    protected final long price; // Order price: the price at which the order has been closed, for market orders it is the price at which the order has been matched and for limit/stop orders it is the price at which the order has been closed
+    protected String orderType; // Order type: market,limit or stop
+    protected final long price; // Order price: the price at which the order has been closed, for market orders
+                                // it is the price at which the order has been matched and for limit/stop orders
+                                // it is the price at which the order has been closed
     protected long timestamp; // Order timestamp: when the order has been closed
     // TODO: ask teacher if the order needs also the timestamp when it has been
     // created
@@ -18,7 +20,11 @@ public abstract class Order {
         this.size = size;
         this.price = price;
         this.timestamp = 0;
-        this.orderType=""; // default value for a generic order
+    }
+
+    public String toJsonString() {
+        return "{" + "\"orderId\":" + orderId + ",\"type\":\"" + type + "\",\"size\":" + size + ",\"orderType\":\""
+                + orderType + "\",\"price\":" + price + ",\"timestamp\":" + timestamp + "}";
     }
 
     public long getOrderId() {
@@ -64,6 +70,5 @@ public abstract class Order {
     public boolean isExecuted() {
         return timestamp != 0;
     }
-
 
 }

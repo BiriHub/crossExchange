@@ -13,26 +13,28 @@ import com.google.gson.JsonObject;
 
 public class UserHandler implements Runnable {
 
-    private final Socket socket;
+    private final Socket clientSocket;
     private BufferedReader input;
     private PrintWriter output;
     private final Gson gson;
     private final CrossServerMain server;
+    private String username;
 
-    public UserHandler(Socket socket, CrossServerMain server) {
-        this.socket = socket;
+    public UserHandler(Socket clientSocket, CrossServerMain server) {
+        this.clientSocket = clientSocket;
         this.server = server;
         gson = new Gson();
+        this.username = null;
     }
 
     @Override
     public void run() {
-        try (BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                PrintWriter output = new PrintWriter(socket.getOutputStream(), true)) {
+        try (BufferedReader input = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                PrintWriter output = new PrintWriter(clientSocket.getOutputStream(), true)) {
 
             String request;
-            while (!Thread.currentThread().isInterrupted() && (request = input.readLine()) != null) {
-                System.out.println("Client request received: " + request);
+            while (!Thread.currentThread().isInterrupted() && !clientSocket.isClosed()
+                    && (request = input.readLine()) != null) {
                 JsonObject jsonRequest = gson.fromJson(request, JsonObject.class);
                 String response = handleRequest(jsonRequest);
                 output.println(response);
@@ -41,17 +43,18 @@ public class UserHandler implements Runnable {
             System.err.println("Client error : " + e.getMessage());
         } finally {
             try {
-                socket.close();
+                clientSocket.close();
             } catch (IOException e) {
                 System.err.println("Error while closing the connection: " + e.getMessage());
             }
+            server.getSessionManager().logoutUser(username); // remove the user session from the session manager if the client disconnects abruptly without logging out
         }
     }
 
     private String handleRequest(JsonObject request) {
         try {
             if (!request.has("operation")) {
-                return gson.toJson(Map.of("response",103,"errorMessage","Missing parameter"));
+                return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameter"));
             }
             String operation = request.get("operation").getAsString();
 

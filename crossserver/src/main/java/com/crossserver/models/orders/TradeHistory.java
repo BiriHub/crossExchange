@@ -1,4 +1,4 @@
-package com.crossserver.models.orders;
+package com.crossserver.models.Orders;
 /*
  * Represents the trade history of the market for a specific day
  */
@@ -15,14 +15,6 @@ public class TradeHistory {
     private long lowestPrice; // Lowest price of the day
     private final ArrayList<Order> fulfilledOrders; // Fulfilled orders of the day
 
-    public TradeHistory(int numberOfDay) {
-        this.numberOfDay = numberOfDay;
-        this.fulfilledOrders = new ArrayList<>();
-        this.openingPrice = -1;
-        this.closingPrice = -1;
-        this.highestPrice = -1;
-        this.lowestPrice = -1;
-    }
     public TradeHistory(int numberOfDay,long openingPrice, long closingPrice, long highestPrice, long lowestPrice,List<Order> orders){
         this.numberOfDay = numberOfDay;
         this.openingPrice = openingPrice;

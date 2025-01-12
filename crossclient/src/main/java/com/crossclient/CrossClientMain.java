@@ -602,43 +602,53 @@ public class CrossClientMain {
         }
     }
 
+    // First access: registration and login
+    private void notLoggedMenu(BufferedReader console) throws IOException {
+        String command;
+        System.out.println("\n--- Menu CROSS ---");
+        System.out.println("Select an operation:");
+        System.out.println("1. Register");
+        System.out.println("2. Login");
+        System.out.println("3. Change user");
+        System.out.println("4. Close the application");
+        System.out.println("\n-------------");
+        command = console.readLine();
+
+        switch (command) {
+            case "1":
+                register(console);
+                break;
+            case "2":
+                login(console);
+                break;
+            case "3":
+                updateCredentials(console);
+                break;
+            case "4":
+                System.out.println("[!] Client closing...");
+                System.exit(0);
+                break;
+            default:
+                System.out.println("Command not recognized.Please select a valid operation.");
+                break;
+        }
+    }
+
     // Menu principale
     public void start() {
         try (BufferedReader console = new BufferedReader(new InputStreamReader(System.in))) {
             String command;
-            System.out.println("\n--- Menu CROSS ---");
-
-            // First access: registration and login
-            do {
-                System.out.println(
-                        "Before proceding with trading operations you firstly need to register an account and log in:");
-                System.out.println("Select an operation:");
-                System.out.println("1. Register");
-                System.out.println("2. Login");
-                System.out.println("3. Update credentials");
-                System.out.println("4. Close the application");
-                command = console.readLine();
-                switch (command) {
-                    case "1":
-                        register(console);
-                    case "2":
-                        login(console);
-                    case "3":
-                        updateCredentials(console);
-                    case "4":
-                        break;
-                    default:
-                        System.out.println("Command not recognized.Please select a valid operation.");
-                }
-
-            } while (!amIlogged());
-
-            // Main menu after login
             while (true) {
 
-                System.out.println("\n-------------");
+                while (!amIlogged()) {
+                    notLoggedMenu(console);
+                }
+
+                // Main menu after login
+                System.out.println("==============\n-------------");
                 System.out.println("Welcome " + usernameLoggedIn + "!");
                 System.out.println("\n-------------");
+                System.out.println("\n--- Menu CROSS ---");
                 System.out.println("Select an operation:");
                 System.out.println("1. Insert limit order");
                 System.out.println("2. Insert market order");
@@ -647,12 +657,13 @@ public class CrossClientMain {
                 System.out.println("5. Price history");
                 System.out.println("6. Change user/logout");
                 System.out.println("7. Close the application");
-                System.out.println("\n-------------");
+                System.out.println("-------------\n==============");
                 command = console.readLine();
 
                 if (command.equals("7")) {
-                    logout(console);
-                    break;
+                    logout();
+                    System.out.println("[!] Client closing...");
+                    System.exit(0);
                 }
                 handleCommand(command, console);
             }
@@ -683,7 +694,7 @@ public class CrossClientMain {
                 getPriceHistory(console);
                 break;
             case "6":
-                logout(console);
+                logout();
                 break;
             default:
                 System.out.println("Command not recognized.Please select a valid operation.");

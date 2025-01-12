@@ -1,4 +1,4 @@
-package com.crossserver.models.orders;
+package com.crossserver.models.Orders;
 
 public class LimitOrder extends Order {
 
@@ -6,5 +6,4 @@ public class LimitOrder extends Order {
         super(orderId, type, size, limitPrice);
         this.orderType = "limit";
     }
-
 }

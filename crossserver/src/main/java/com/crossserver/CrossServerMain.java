@@ -13,15 +13,17 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.lang.reflect.Type;
 
 import com.crossserver.models.*;
+import com.crossserver.models.Notification.UDPNotifier;
+import com.crossserver.models.Orders.LimitOrder;
+import com.crossserver.models.Orders.Order;
+import com.crossserver.models.Orders.OrderBook;
+import com.crossserver.models.Orders.StopOrder;
+import com.crossserver.models.Orders.TradeHistory;
 import com.crossserver.models.Session.SessionManager;
-import com.crossserver.models.orders.LimitOrder;
-import com.crossserver.models.orders.Order;
-import com.crossserver.models.orders.OrderBook;
-import com.crossserver.models.orders.StopOrder;
-import com.crossserver.models.orders.TradeHistory;
 import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
 
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -52,6 +54,7 @@ public class CrossServerMain {
 
     private OrderBook orderBook;
     private static AtomicLong orderIdCounter; // Order ID counter
+    private UDPNotifier notifier; // UDP notifier
 
     private ServerSocket serverSocket; // Server socket
     private int serverPort; // Server port
@@ -70,7 +73,8 @@ public class CrossServerMain {
         usersDB = new ConcurrentHashMap<>();
         sessionManager = new SessionManager(maxSessionTime);
         gson = new Gson();
-        orderBook = new OrderBook();
+        notifier = new UDPNotifier();
+        orderBook = new OrderBook(notifier);
         // activeUserConnections = new ConcurrentHashMap<>();
         orderIdCounter = new AtomicLong(0);
         threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
@@ -195,7 +199,7 @@ public class CrossServerMain {
     }
 
     private void loadUserDB(String filename) {
-        try (Reader reader = new FileReader(filename)) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
             Type type = new TypeToken<Map<String, String>>() {
             }.getType();
             Map<String, String> map = gson.fromJson(reader, type);
@@ -211,7 +215,7 @@ public class CrossServerMain {
     }
 
     private void loadOrderHistory(String filename) {
-        try (Reader reader = new FileReader(filename)) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
 
             Type type = new TypeToken<Map<String, Object>>() {
             }.getType();
@@ -241,7 +245,7 @@ public class CrossServerMain {
         } catch (FileNotFoundException e) {
             System.out.println("[Configuration loading] No previous state file found, starting fresh.");
             orderIdCounter = new AtomicLong(0);
-            orderBook = new OrderBook();
+            orderBook = new OrderBook(notifier);
         } catch (IOException e) {
             System.err.println("Error loading state from file: " + e.getMessage());
         } catch (Exception e) {
@@ -545,18 +549,21 @@ public class CrossServerMain {
         sessionManager.logoutUser(username);
         // activeUserConnections.remove(username);
 
+        // unregister the user from the UDP notifier
+        notifier.unregisterUdpClient(username); 
+
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
 
     // Manage limit order request
-    public String handleLimitOrderRequest(JsonObject request) {
+    public String handleLimitOrderRequest(JsonObject request, Socket clientSocket) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
         if (!values.has("type") || !values.has("size") || !values.has("price")
-                || !values.has("userId")) {
+                || !values.has("userId") || !values.has("udpPort")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
 
@@ -574,6 +581,10 @@ public class CrossServerMain {
 
         LimitOrder order = new LimitOrder(orderIdCounter.getAndIncrement(), type, size, price);
         order.setUserId(userId);
+        int udpPort = values.get("udpPort").getAsInt();
+
+        // Register the user's UDP port for notifications
+        notifier.registerUdpClient(userId, clientSocket.getInetAddress(), udpPort);
 
         orderBook.insertLimitOrder(order); // insert the order in the order book
         long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
@@ -581,13 +592,13 @@ public class CrossServerMain {
     }
 
     // Gestione Market Order (placeholder)
-    public String handleMarketOrderRequest(JsonObject request) {
+    public String handleMarketOrderRequest(JsonObject request, Socket clientSocket) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
-        if (!values.has("type") || !values.has("size") || !values.has("userId")) {
+        if (!values.has("type") || !values.has("size") || !values.has("userId") || !values.has("udpPort")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
 
@@ -601,6 +612,10 @@ public class CrossServerMain {
                 || size <= 0) {
             return gson.toJson(Map.of("orderID", -1)); // error
         }
+        int udpPort = values.get("udpPort").getAsInt();
+
+        // Register the user's UDP port for notifications
+        notifier.registerUdpClient(userId, clientSocket.getInetAddress(), udpPort);
 
         // insert the order in the order book and return its identifier
         long executedOrderid = orderBook.insertMarketOrder(orderIdCounter.getAndIncrement(), type, size, userId);
@@ -610,13 +625,14 @@ public class CrossServerMain {
 
     }
 
-    public String handleStopOrderRequest(JsonObject request) {
+    public String handleStopOrderRequest(JsonObject request, Socket clientSocket) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderID", -1)); // error: missing parameters
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
-        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId")) {
+        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId")
+                || !values.has("udpPort")) {
             return gson.toJson(Map.of("orderID", -1)); // Errore
         }
 
@@ -628,6 +644,10 @@ public class CrossServerMain {
         if (!type.equals("bid") && !type.equals("ask")) {
             return gson.toJson(Map.of("orderID", -1)); // Errore
         }
+        int udpPort = values.get("udpPort").getAsInt();
+
+        // Register the user's UDP port for notifications
+        notifier.registerUdpClient(userId, clientSocket.getInetAddress(), udpPort);
 
         // stop order creation
         StopOrder stopOrder = new StopOrder(orderIdCounter.getAndIncrement(), type, size, price);

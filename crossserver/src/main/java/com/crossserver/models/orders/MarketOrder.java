@@ -1,4 +1,4 @@
-package com.crossserver.models.orders;
+package com.crossserver.models.Orders;
 
 public class MarketOrder extends Order {
 

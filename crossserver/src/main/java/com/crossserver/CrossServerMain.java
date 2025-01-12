@@ -199,7 +199,7 @@ public class CrossServerMain {
     }
 
     private void loadUserDB(String filename) {
-        try (Reader reader = new FileReader(filename)) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
             Type type = new TypeToken<Map<String, String>>() {
             }.getType();
             Map<String, String> map = gson.fromJson(reader, type);
@@ -215,7 +215,7 @@ public class CrossServerMain {
     }
 
     private void loadOrderHistory(String filename) {
-        try (Reader reader = new FileReader(filename)) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
 
             Type type = new TypeToken<Map<String, Object>>() {
             }.getType();

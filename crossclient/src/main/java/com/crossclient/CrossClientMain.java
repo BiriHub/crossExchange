@@ -211,13 +211,13 @@ public class CrossClientMain {
             // Response parsing
             String response = input.readLine();
             JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-            if (jsonResponse.has("session") && jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
+            if (jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
 
                 int responseCode = jsonResponse.get("response").getAsInt();
                 String errorMessage = jsonResponse.get("errorMessage").getAsString();
 
                 // 100 - login successful
-                if (responseCode == 100) {
+                if (responseCode == 100 && jsonResponse.has("session")) {
                     maxLoginTime = jsonResponse.get("session").getAsLong(); // Save the maximum login time for users
                     userSessionTimestamp = System.currentTimeMillis(); // Save the timestamp of the beginning of user
                                                                        // session
@@ -242,7 +242,7 @@ public class CrossClientMain {
     }
 
     // Logout
-    private void logout(BufferedReader console) throws IOException {
+    private void logout() throws IOException {
         if (!amIlogged()) {
             System.out.println("[!] Server response code: 101 - user not logged in"); // locally check if the user is
                                                                                       // logged in and print the message
@@ -320,8 +320,11 @@ public class CrossClientMain {
             }
         } while (price <= 0);
 
-        String request = gson.toJson(Map.of("operation", "insertLimitOrder", "values", Map.of("userId", usernameLoggedIn,
-                "type", type, "size", size, "price", price)));
+        int udpPort = datagramSocket.getLocalPort();
+
+        String request = gson
+                .toJson(Map.of("operation", "insertLimitOrder", "values", Map.of(
+                        "type", type, "size", size, "price", price, "userId", usernameLoggedIn, "udpPort", udpPort)));
         output.println(request);
 
         // Response parsing
@@ -386,8 +389,12 @@ public class CrossClientMain {
             }
         } while (price <= 0);
 
-        String request = gson.toJson(Map.of("operation", "insertMarketOrder", "values", Map.of("userId", usernameLoggedIn,
-                "type", type, "size", size)));
+        int numPort = datagramSocket.getLocalPort();
+
+        String request = gson
+                .toJson(Map.of("operation", "insertMarketOrder", "values",
+                        Map.of("userId", usernameLoggedIn, "udpPort", numPort,
+                                "type", type, "size", size)));
         output.println(request);
 
         // Response parsing
@@ -451,8 +458,11 @@ public class CrossClientMain {
             }
         } while (price <= 0);
 
-        String request = gson.toJson(Map.of("operation", "insertStopOrder", "values", Map.of("userId", usernameLoggedIn,
-                "type", type, "size", size, "price", price)));
+        int numPort = datagramSocket.getLocalPort();
+
+        String request = gson.toJson(
+                Map.of("operation", "insertStopOrder", "values", Map.of("userId", usernameLoggedIn, "udpPort", numPort,
+                        "type", type, "size", size, "price", price)));
         output.println(request);
 
         // Response parsing
@@ -486,7 +496,8 @@ public class CrossClientMain {
         } while (orderId <= 0);
 
         String request = gson
-                .toJson(Map.of("operation", "cancelOrder", "values", Map.of("userId", usernameLoggedIn, "orderId", orderId)));
+                .toJson(Map.of("operation", "cancelOrder", "values",
+                        Map.of("userId", usernameLoggedIn, "orderId", orderId)));
         output.println(request);
 
         // Response parsing

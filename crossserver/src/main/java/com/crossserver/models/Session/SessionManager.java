@@ -26,7 +26,8 @@ public class SessionManager {
 
     // Remove user session
     public void logoutUser(String username) {
-        sessionMap.remove(username);
+        if (username!=null && sessionMap.containsKey(username))
+            sessionMap.remove(username);
     }
 
     // Check if user is logged in

@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.util.HashMap;
 import java.util.Map;
 
 import com.crossserver.CrossServerMain;
@@ -63,16 +64,24 @@ public class UserHandler implements Runnable {
                     return server.register(request);
                 case "updateCredentials": // update credentials
                     return server.updateCredentials(request);
-                case "login": // Login 
-                    return server.login(request, this);
+                case "login": // Login
+                    Map<String,Object> loginResponse = new HashMap<>(server.login(request, this));
+                    
+                    username = loginResponse.get("userId").toString(); // store the username in the session
+                    loginResponse.remove("userId"); // remove the username from the response
+                    return gson.toJson(loginResponse); // remove username from response and return the formatted response to the client
+
                 case "logout": // Logout
-                    return server.logout(request,this);
+                    String logoutResponse=server.logout(request, this);
+                    username=null; // remove the username from the session
+                    return logoutResponse;
+                
                 case "3": // add limit order
-                    return server.handleLimitOrderRequest(request);
+                    return server.handleLimitOrderRequest(request,clientSocket);
                 case "4": // add market order
-                    return server.handleMarketOrderRequest(request);
+                    return server.handleMarketOrderRequest(request,clientSocket);
                 case "5": // add stop order
-                    return server.handleStopOrderRequest(request);
+                    return server.handleStopOrderRequest(request,clientSocket);
                 case "6": // cancel order
                     return server.cancelOrder(request);
                 case "7": // get order book history

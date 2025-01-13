@@ -321,25 +321,25 @@ public class OrderBook {
         return response;
 
     }
-
+    
     public void setLimitAskOrders(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitAskOrders) {
-        this.limitAskOrders = limitAskOrders;
+        this.limitAskOrders = new ConcurrentSkipListMap<>(limitAskOrders);
     }
 
     public void setLimitBidOrders(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitBidOrders) {
-        this.limitBidOrders = limitBidOrders;
+        this.limitBidOrders = new ConcurrentSkipListMap<>(limitBidOrders);
     }
 
     public void setStopBidOrders(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>> stopBidOrders) {
-        this.stopBidOrders = stopBidOrders;
+        this.stopBidOrders = new ConcurrentSkipListMap<>(stopBidOrders);
     }
 
     public void setStopAskOrders(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>> stopAskOrders) {
-        this.stopAskOrders = stopAskOrders;
+        this.stopAskOrders = new ConcurrentSkipListMap<>(stopAskOrders);
     }
 
     public void setOrderHistory(ConcurrentLinkedQueue<Order> orderHistory) {
-        this.orderHistory = orderHistory;
+        this.orderHistory = new ConcurrentLinkedQueue<>(orderHistory);
     }
 
     public ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> getLimitAskOrders() {

@@ -15,6 +15,7 @@ import java.lang.reflect.Type;
 import com.crossserver.models.*;
 import com.crossserver.models.Notification.UDPNotifier;
 import com.crossserver.models.Orders.LimitOrder;
+import com.crossserver.models.Orders.MarketOrder;
 import com.crossserver.models.Orders.Order;
 import com.crossserver.models.Orders.OrderBook;
 import com.crossserver.models.Orders.StopOrder;
@@ -28,9 +29,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.Timestamp;
 import java.time.LocalDate;
 import java.util.Calendar;
 import java.util.List;
@@ -39,11 +40,13 @@ import java.util.Properties;
 
 public class CrossServerMain {
 
-    private static final String CONFIG_FILE = "server.properties"; // Configuration file
-    private static final String USERS_DB = "users.json"; // User database file
-    private static final String ORDER_HISTORY_DB = "orderHistoryDB.json"; // order history database file
-    private static final String LIMIT_ORDER_DB = "limitDB.json"; // not executed limit order database file
-    private static final String STOP_ORDER_DB = "stopDB.json"; // not executed stop order database file
+    private static final String CONFIG_FILE = "configuration/server.properties"; // Configuration file
+    private static final String USERS_DB = "data/users.json"; // User database file
+    private static final String ORDER_HISTORY_DB = "data/storicoOrdiniProf.json";// "data/orderHistoryDB.json"; // order
+                                                                                 // history database file
+    private static final String LIMIT_ORDER_DB = "data/limitDB.json"; // not executed limit order database file
+    private static final String STOP_ORDER_DB = "data/stopDB.json"; // not executed stop order database file
+
     private final ScheduledExecutorService DBpersistenceExecutor; // Database persistence executor: used to save the
                                                                   // databases periodically
 
@@ -120,11 +123,12 @@ public class CrossServerMain {
         DBpersistenceExecutor.scheduleAtFixedRate(() -> {
             try {
                 saveDatabases();
+                System.out.println("[DB] Periodic persistence completed successfully");
             } catch (Exception e) {
                 System.err.println("[ERROR] Periodic persistence failed: " + e.getMessage());
             }
-        }, periodicallySaveDB * 2, periodicallySaveDB, TimeUnit.SECONDS); // execute the task every "periodicallySaveDB"
-                                                                          // seconds according the configuration file
+        }, 0, periodicallySaveDB, TimeUnit.MILLISECONDS); // execute the task every "periodicallySaveDB"
+                                                          // seconds according the configuration file
     }
 
     /*
@@ -132,7 +136,7 @@ public class CrossServerMain {
      * 
      */
     private void loadConfiguration() {
-        try (InputStream configFileStream = CrossServerMain.class.getResourceAsStream(CONFIG_FILE)) {
+        try (InputStream configFileStream = getClass().getClassLoader().getResourceAsStream(CONFIG_FILE)) {
             Properties config = new Properties();
             config.load(configFileStream);
             serverPort = Integer.parseInt(config.getProperty("port")); // extract the port from the configuration file
@@ -174,8 +178,14 @@ public class CrossServerMain {
                 Map.of("stopAskOrders", orderBook.getStopAskOrders(), "stopBidOrders", orderBook.getStopBidOrders()));
     }
 
+    /*
+     * Save the data structure in the file in JSON format
+     */
     private void saveToFile(String filename, Map<String, ?> data) {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filename))) {
+        // return the absolute path of the file
+        URL resource = getClass().getClassLoader().getResource(filename);
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(resource.getPath()))) {
+            // write the information in the data structure to the file in JSON format
             gson.toJson(data, writer);
         } catch (IOException e) {
             System.err.println("Error saving data to file: " + e.getMessage());
@@ -199,7 +209,12 @@ public class CrossServerMain {
     }
 
     private void loadUserDB(String filename) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
+        try (InputStream configFileStream = getClass().getClassLoader().getResourceAsStream(filename)) {
+            if (configFileStream == null) {
+                throw new FileNotFoundException();
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(configFileStream));
+
             Type type = new TypeToken<Map<String, String>>() {
             }.getType();
             Map<String, String> map = gson.fromJson(reader, type);
@@ -215,38 +230,64 @@ public class CrossServerMain {
     }
 
     private void loadOrderHistory(String filename) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
-
-            Type type = new TypeToken<Map<String, Object>>() {
-            }.getType();
-
-            Map<String, Object> map = gson.fromJson(reader, type);
-
-            if (map != null) {
-                // set the order id counter
-                if (map.containsKey("orderIdCounter")) {
-                    orderIdCounter = new AtomicLong((long) map.get("orderIdCounter"));
-                }
-
-                // update the order history book
-                if (map.containsKey("orderHistory")) {
-                    // convert the JSON array of trades into a list of orders
-                    Type orderListType = new TypeToken<List<Order>>() {
-                    }.getType();
-                    List<Order> orderList = gson.fromJson(gson.toJson(map.get("trades")), orderListType);
-
-                    // set the order history of the order book
-                    ConcurrentLinkedQueue<Order> orderHistory = new ConcurrentLinkedQueue<>(orderList);
-                    orderBook.setOrderHistory(orderHistory);
-                }
-
-                System.out.println("State loaded successfully from " + filename);
+        try (InputStream configFileStream = getClass().getClassLoader().getResourceAsStream(filename)) {
+            if (configFileStream == null) {
+                throw new FileNotFoundException();
             }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(configFileStream));
+
+            JsonObject jsonObjectFile = gson.fromJson(reader, JsonObject.class);
+
+            if (jsonObjectFile == null || !jsonObjectFile.has("trades")) {
+                throw new FileNotFoundException();
+            }
+
+            // update the order history book
+            if (jsonObjectFile.has("trades")) {
+                // convert the JSON array of trades into a JsonArray
+                JsonArray orderArray = jsonObjectFile.getAsJsonArray("trades");
+
+                // set the order history of the order book
+                ConcurrentLinkedQueue<Order> orderHistory = new ConcurrentLinkedQueue<>();
+
+                for (JsonElement orderElement : orderArray) {
+                    JsonObject orderJson = orderElement.getAsJsonObject();
+                    String orderType = orderJson.get("orderType").getAsString();
+                    Order order = null;
+                    switch (orderType) {
+                        case "market":
+                            order = gson.fromJson(orderJson, MarketOrder.class);
+                            break;
+                        case "limit":
+                            order = gson.fromJson(orderJson, LimitOrder.class);
+                            break;
+                        case "stop":
+                            order = gson.fromJson(orderJson, StopOrder.class);
+                            break;
+                    }
+                    if (order != null) {
+                        orderHistory.add(order);
+                    }
+                }
+
+                orderBook.setOrderHistory(orderHistory);
+            }
+
+            // set the order id counter
+            if (jsonObjectFile.has("orderIdCounter")) {
+                orderIdCounter = new AtomicLong(jsonObjectFile.get("orderIdCounter").getAsLong());
+            } else {
+                orderIdCounter = new AtomicLong(0);
+            }
+
+            System.out.println("State loaded successfully from " + filename);
+
         } catch (FileNotFoundException e) {
             System.out.println("[Configuration loading] No previous state file found, starting fresh.");
             orderIdCounter = new AtomicLong(0);
-            orderBook = new OrderBook(notifier);
         } catch (IOException e) {
+            System.err.println("Error loading state from file: " + e.getMessage());
+        } catch (JsonSyntaxException e) {
             System.err.println("Error loading state from file: " + e.getMessage());
         } catch (Exception e) {
             System.err.println("Unexpected error while loading state: " + e.getMessage());
@@ -254,39 +295,38 @@ public class CrossServerMain {
     }
 
     private void loadLimitOrders(String filename) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
+        try (InputStream configFileStream = getClass().getClassLoader().getResourceAsStream(filename)) {
+            if (configFileStream == null) {
+                throw new FileNotFoundException();
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(configFileStream));
+
             Type type = new TypeToken<Map<String, Object>>() {
             }.getType();
-            Map<String, Object> map = gson.fromJson(reader, type);
+            Map<String, Object> map = gson.fromJson(reader, type); // TODO: probabilmente posso ottimizzare la lettura
+                                                                   // utilizzando direttamente un JSONOBJECT
 
             if (map != null) {
+                // define the type of the limit order list for the json deserialization
+                Type orderListType = new TypeToken<ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>>>() {
+                }.getType();
 
                 // load the limit ask orders
                 if (map.containsKey("limitAskOrders")) {
-                    Type orderListType = new TypeToken<List<LimitOrder>>() {
-                    }.getType();
-                    List<LimitOrder> limitAskOrdersFromJsonFile = gson.fromJson(gson.toJson(map.get("limitAskOrders")),
-                            orderListType);
-                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitAskOrders = new ConcurrentSkipListMap<>();
-                    for (LimitOrder order : limitAskOrdersFromJsonFile) {
-                        limitAskOrders.putIfAbsent(order.getPrice(), new ConcurrentLinkedQueue<LimitOrder>())
-                                .offer(order);
-                    }
-                    orderBook.setLimitAskOrders(limitAskOrders);
+                    // extract the limit ask orders from the JSON file
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitAskOrdersFromJsonFile = gson
+                            .fromJson(
+                                    gson.toJson(map.get("limitAskOrders")), orderListType);
+                    orderBook.setLimitAskOrders(limitAskOrdersFromJsonFile);
                 }
 
                 // load the limit bid orders
                 if (map.containsKey("limitBidOrders")) {
-                    Type orderListType = new TypeToken<List<LimitOrder>>() {
-                    }.getType();
-                    List<LimitOrder> limitBidOrdersFromJsonFile = gson.fromJson(gson.toJson(map.get("limitBidOrders")),
-                            orderListType);
-                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitBidOrders = new ConcurrentSkipListMap<>();
-                    for (LimitOrder order : limitBidOrdersFromJsonFile) {
-                        limitBidOrders.putIfAbsent(order.getPrice(), new ConcurrentLinkedQueue<LimitOrder>())
-                                .offer(order);
-                    }
-                    orderBook.setLimitBidOrders(limitBidOrders);
+
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitBidOrdersFromJsonFile = gson
+                            .fromJson(
+                                    gson.toJson(map.get("limitBidOrders")), orderListType);
+                    orderBook.setLimitBidOrders(limitBidOrdersFromJsonFile);
                 }
 
                 System.out.println("State loaded successfully from " + filename);
@@ -299,37 +339,36 @@ public class CrossServerMain {
     }
 
     private void loadStopOrders(String filename) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(filename))) {
+        try (InputStream configFileStream = getClass().getClassLoader().getResourceAsStream(filename)) {
+            if (configFileStream == null) {
+                throw new FileNotFoundException();
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(configFileStream));
+
             Type type = new TypeToken<Map<String, Object>>() {
             }.getType();
             Map<String, Object> map = gson.fromJson(reader, type);
             if (map != null) {
+                // define the type of the limit order list for the json deserialization
+                Type orderListType = new TypeToken<ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>>>() {
+                }.getType();
+
                 // load the stop ask orders
                 if (map.containsKey("stopAskOrders")) {
-                    Type orderListType = new TypeToken<List<StopOrder>>() {
-                    }.getType();
-                    List<StopOrder> stopAskOrdersFromJsonFile = gson.fromJson(gson.toJson(map.get("stopAskOrders")),
-                            orderListType);
-                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>> stopAskOrders = new ConcurrentSkipListMap<>();
-                    for (StopOrder order : stopAskOrdersFromJsonFile) {
-                        stopAskOrders.putIfAbsent(order.getPrice(), new ConcurrentLinkedQueue<StopOrder>())
-                                .offer(order);
-                    }
-                    orderBook.setStopAskOrders(stopAskOrders);
+                    // extract the limit ask orders from the JSON file
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> stopAskOrdersFromJsonFile = gson
+                            .fromJson(
+                                    gson.toJson(map.get("stopAskOrders")), orderListType);
+                    orderBook.setLimitAskOrders(stopAskOrdersFromJsonFile);
                 }
 
                 // load the stop bid orders
                 if (map.containsKey("stopBidOrders")) {
-                    Type orderListType = new TypeToken<List<StopOrder>>() {
-                    }.getType();
-                    List<StopOrder> stopBidOrdersFromJsonFile = gson.fromJson(gson.toJson(map.get("stopBidOrders")),
-                            orderListType);
-                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<StopOrder>> stopBidOrders = new ConcurrentSkipListMap<>();
-                    for (StopOrder order : stopBidOrdersFromJsonFile) {
-                        stopBidOrders.putIfAbsent(order.getPrice(), new ConcurrentLinkedQueue<StopOrder>())
-                                .offer(order);
-                    }
-                    orderBook.setStopBidOrders(stopBidOrders);
+                    // extract the limit ask orders from the JSON file
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> stopBidOrdersFromJsonFile = gson
+                            .fromJson(
+                                    gson.toJson(map.get("stopBidOrders")), orderListType);
+                    orderBook.setLimitAskOrders(stopBidOrdersFromJsonFile);
                 }
 
                 System.out.println("State loaded successfully from " + filename);
@@ -520,7 +559,7 @@ public class CrossServerMain {
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
-        if (!request.has("username")) {
+        if (!values.has("username")) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
         }
         String username = values.get("username").getAsString();
@@ -550,7 +589,7 @@ public class CrossServerMain {
         // activeUserConnections.remove(username);
 
         // unregister the user from the UDP notifier
-        notifier.unregisterUdpClient(username); 
+        notifier.unregisterUdpClient(username);
 
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }

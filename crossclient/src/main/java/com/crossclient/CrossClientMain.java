@@ -141,8 +141,11 @@ public class CrossClientMain {
     private void register(BufferedReader console) throws IOException {
         String username;
         String password;
-        boolean flag = false;
+        boolean flag;
+        System.out.println(
+                "=== User registration ===\n The password must contains at least:\n - 8 and at maximum 20 characters\n - one uppercase letter\n - one lowercase letter\n - one number.\n =======================");
         do {
+            flag = false;
             System.out.print("Username: ");
             username = console.readLine();
             System.out.print("Password: ");
@@ -151,7 +154,6 @@ public class CrossClientMain {
                 System.out.println("Username and password must not be empty.");
                 flag = true;
             }
-
         } while (flag);
 
         String request = gson.toJson(Map.of("operation", "register", "values", Map.of("username", username, "password",
@@ -173,14 +175,24 @@ public class CrossClientMain {
     private void updateCredentials(BufferedReader console) throws IOException {
         if (!amIlogged()) {
 
-            System.out.print("Username: ");
-            String username = console.readLine();
-            System.out.print("Current password: ");
-            String currentPassword = console.readLine();
-            System.out.print("New password: ");
-            String newPassword = console.readLine();
+            String username, currentPassword, newPassword;
+            boolean flag=false;
+            do {
+                flag = false;
+                System.out.print("Username: ");
+                username = console.readLine();
+                System.out.print("Current password: ");
+                currentPassword = console.readLine();
+                System.out.print("New password: ");
+                newPassword = console.readLine();
+                if (username.isEmpty() || currentPassword.isEmpty() || newPassword.isEmpty()) {
+                    System.out.println("Username, current password and new password must not be empty.");
+                    flag = true;
+                }
+            } while (flag);
+
             String request = gson.toJson(Map.of("operation", "updateCredentials", "values",
-                    Map.of("username", username, "currentPassword", currentPassword, "newPassword", newPassword)));
+                    Map.of("username", username, "old_password", currentPassword, "new-password", newPassword)));
             output.println(request);
 
             // Response parsing
@@ -203,10 +215,22 @@ public class CrossClientMain {
     // User login
     private void login(BufferedReader console) throws IOException {
         if (!amIlogged()) {
-            System.out.print("Username: ");
-            String username = console.readLine();
-            System.out.print("Password: ");
-            String password = console.readLine();
+
+            String username, password;
+            boolean flag;
+
+            do {
+                flag = false;
+                System.out.print("Username: ");
+                username = console.readLine();
+                System.out.print("Password: ");
+                password = console.readLine();
+                if (username.isEmpty() || password.isEmpty()) {
+                    System.out.println("Username and password must not be empty.");
+                    flag = true;
+                }
+
+            } while (flag);
 
             String request = gson.toJson(Map.of("operation", "login", "values",
                     Map.of("username", username, "password", password)));
@@ -255,7 +279,7 @@ public class CrossClientMain {
             return;
         }
 
-        output.println(Map.of("operation", "logout", "values", Map.of("userId", usernameLoggedIn)));
+        output.println(Map.of("operation", "logout", "values", Map.of("username", usernameLoggedIn)));
 
         // Response parsing
         String response = input.readLine();
@@ -263,11 +287,12 @@ public class CrossClientMain {
         if (jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
             int responseCode = jsonResponse.get("response").getAsInt();
             String errorMessage = jsonResponse.get("errorMessage").getAsString();
+            System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
             if (responseCode == 100) {
+                System.out.println("[!] Logout for the user \"" + usernameLoggedIn + "\" successful.");
                 userSessionTimestamp = 0; // Reset the user session timestamp
                 usernameLoggedIn = null; // Reset the username of the user logged in
             }
-            System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
 
         }
     }
@@ -609,7 +634,7 @@ public class CrossClientMain {
         System.out.println("Select an operation:");
         System.out.println("1. Register");
         System.out.println("2. Login");
-        System.out.println("3. Change user");
+        System.out.println("3. Change user profile password");
         System.out.println("4. Close the application");
         System.out.println("\n-------------");
         command = console.readLine();
@@ -645,9 +670,9 @@ public class CrossClientMain {
                 }
 
                 // Main menu after login
-                System.out.println("==============\n-------------");
-                System.out.println("Welcome " + usernameLoggedIn + "!");
                 System.out.println("\n-------------");
+                System.out.println("Welcome " + usernameLoggedIn + "!");
+                System.out.println("-------------");
                 System.out.println("\n--- Menu CROSS ---");
                 System.out.println("Select an operation:");
                 System.out.println("1. Insert limit order");
@@ -657,7 +682,7 @@ public class CrossClientMain {
                 System.out.println("5. Price history");
                 System.out.println("6. Change user/logout");
                 System.out.println("7. Close the application");
-                System.out.println("-------------\n==============");
+                System.out.println("--------------------");
                 command = console.readLine();
 
                 if (command.equals("7")) {
@@ -667,8 +692,11 @@ public class CrossClientMain {
                 }
                 handleCommand(command, console);
             }
+        } catch (SocketException e) {
+            System.err.println("[!]The connection with server has been lost:" + e.getMessage());
+
         } catch (IOException e) {
-            System.err.println("Errore di input/output: " + e.getMessage());
+            System.err.println("[!] Generic error: " + e.getStackTrace());
         } finally {
             disconnect();
         }

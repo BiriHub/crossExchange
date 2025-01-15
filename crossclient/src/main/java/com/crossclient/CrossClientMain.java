@@ -1,15 +1,21 @@
 package com.crossclient;
 
 import java.io.*;
+import java.lang.reflect.Type;
 import java.net.*;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
 import com.google.gson.*;
+import com.google.gson.reflect.TypeToken;
 
 import java.util.Calendar;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.SortedMap;
+import java.util.SortedSet;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -31,16 +37,17 @@ public class CrossClientMain {
     private BufferedReader input; // Input stream of the socket
     private PrintWriter output; // Output stream of the socket
     private final Gson gson = new Gson();
-    private final ExecutorService udpNotificationListener;
+    private final ExecutorService udpNotificationExecutor;
 
     public CrossClientMain() throws IOException {
         // Load the default configuration and connect to the server
         loadConfiguration();
-        udpNotificationListener = Executors.newSingleThreadExecutor();
+        udpNotificationExecutor = Executors.newSingleThreadExecutor();
 
+        // Shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             // Shutdown the UDP notification listener
-            udpNotificationListener.shutdownNow();
+            udpNotificationExecutor.shutdownNow();
             try {
                 if (amIlogged()) {
                     logout();
@@ -80,6 +87,8 @@ public class CrossClientMain {
             socket = new Socket(serverHost, serverPort);
             datagramSocket = new DatagramSocket();
 
+            // Start the UDP notification listener
+            udpNotificationListener();
             input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             output = new PrintWriter(socket.getOutputStream(), true);
             System.out.println("[!] Connesso al server " + serverHost + ":" + serverPort);
@@ -102,24 +111,25 @@ public class CrossClientMain {
      * Listen for notifications from the server,
      */
     public void udpNotificationListener() {
-        udpNotificationListener.execute(() -> {
+
+        udpNotificationExecutor.execute(() -> {
             try {
                 byte[] buffer = new byte[1024];
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 while (true) {
                     datagramSocket.receive(packet);
-                    JsonObject udpNotification = JsonParser
-                            .parseString(new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8))
+                    JsonObject udpNotification = JsonParser.parseString(new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8))
                             .getAsJsonObject();
-                    System.out.println("========================\n[!] New notification");
+                    System.out.println("========================");
                     if (udpNotification.has("notification") && udpNotification.has("trades")) {
                         String notification = udpNotification.get("notification").getAsString();
-                        System.out.println("[!] Notification: " + notification);
+                        System.out.println("[!] New Notification: " + notification);
                         JsonArray trades = udpNotification.get("trades").getAsJsonArray();
                         for (JsonElement trade : trades) {
                             JsonObject tradeObj = trade.getAsJsonObject();
                             System.out.println("Order ID: " + tradeObj.get("orderId").getAsString());
                             System.out.println("Type: " + tradeObj.get("type").getAsString());
+                            System.out.println("Type of order: " + tradeObj.get("orderType").getAsString());
                             System.out.println("Size: " + tradeObj.get("size").getAsString());
                             System.out.println("Price: " + tradeObj.get("price").getAsString());
                             System.out.println("Timestamp: " + tradeObj.get("timestamp").getAsString());
@@ -129,6 +139,8 @@ public class CrossClientMain {
 
                     }
                 }
+            } catch (JsonSyntaxException e) {
+                System.err.println("Error while parsing the notification: " + e.getMessage());
             } catch (SocketException e) {
                 System.err.println("Error while setting up UDP listener : " + e.getMessage());
             } catch (IOException e) {
@@ -156,8 +168,7 @@ public class CrossClientMain {
             }
         } while (flag);
 
-        String request = gson.toJson(Map.of("operation", "register", "values", Map.of("username", username, "password",
-                password)));
+        String request = gson.toJson(Map.of("operation", "register", "values", Map.of("username", username, "password", password)));
         output.println(request);
 
         // Response parsing
@@ -171,12 +182,16 @@ public class CrossClientMain {
 
     }
 
-    // Update user credentials
+    /*
+     * Update user credentials JSON format of the request: { "operation": "updateCredentials",
+     * "values": { "username": STRING, "currentPassword": STRING, "newPassword": STRING } }
+     * JSON format of the response: { "response": INT, "errorMessage": STRING }
+     */
     private void updateCredentials(BufferedReader console) throws IOException {
         if (!amIlogged()) {
 
             String username, currentPassword, newPassword;
-            boolean flag=false;
+            boolean flag = false;
             do {
                 flag = false;
                 System.out.print("Username: ");
@@ -212,7 +227,11 @@ public class CrossClientMain {
         }
     }
 
-    // User login
+    /*
+     * User login JSON format of the request: { "operation": "login", "values": { "username":
+     * STRING, "password": STRING } JSON format of the response: { "response": INT,
+     * "errorMessage": STRING, "session": LONG }
+     */
     private void login(BufferedReader console) throws IOException {
         if (!amIlogged()) {
 
@@ -232,8 +251,7 @@ public class CrossClientMain {
 
             } while (flag);
 
-            String request = gson.toJson(Map.of("operation", "login", "values",
-                    Map.of("username", username, "password", password)));
+            String request = gson.toJson(Map.of("operation", "login", "values", Map.of("username", username, "password", password)));
             output.println(request);
 
             // Response parsing
@@ -269,7 +287,11 @@ public class CrossClientMain {
         return (System.currentTimeMillis() - userSessionTimestamp) < maxLoginTime && usernameLoggedIn != null;
     }
 
-    // Logout
+    /*
+     * Logout the user JSON format of the request: { "operation": "logout", "values": {
+     * "username": STRING } } JSON format of the response: { "response": INT, "errorMessage":
+     * STRING }
+     */
     private void logout() throws IOException {
         if (!amIlogged()) {
             System.out.println("[!] Server response code: 101 - user not logged in"); // locally check if the user is
@@ -313,14 +335,14 @@ public class CrossClientMain {
             System.out.println("2. Bid");
             type = console.readLine();
             switch (type) {
-                case "1":
-                    type = "ask";
-                    break;
-                case "2":
-                    type = "bid";
-                    break;
-                default:
-                    System.out.println("Command not recognized.Please select a valid type.");
+            case "1":
+                type = "ask";
+                break;
+            case "2":
+                type = "bid";
+                break;
+            default:
+                System.out.println("Command not recognized.Please select a valid type.");
             }
 
         } while ((!type.equals("ask") && !type.equals("bid")) || type.isEmpty());
@@ -351,17 +373,18 @@ public class CrossClientMain {
 
         int udpPort = datagramSocket.getLocalPort();
 
-        String request = gson
-                .toJson(Map.of("operation", "insertLimitOrder", "values", Map.of(
-                        "type", type, "size", size, "price", price, "userId", usernameLoggedIn, "udpPort", udpPort)));
+        String request = gson.toJson(Map.of("operation", "insertLimitOrder", "values",
+                Map.of("type", type, "size", size, "price", price, "userId", usernameLoggedIn, "udpPort", udpPort)));
         output.println(request);
 
         // Response parsing
         String response = input.readLine();
         JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-        if (jsonResponse.has("orderId") && jsonResponse.has("newUserSession")) {
+        if (jsonResponse.has("orderId")) {
             int orderId = jsonResponse.get("orderId").getAsInt();
-            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            if (jsonResponse.has("newUserSession")) {
+                userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            }
             System.out.println("[!] orderId: " + orderId);
         }
     }
@@ -374,7 +397,6 @@ public class CrossClientMain {
         }
         String type;
         long size = 0;
-        long price = 0;
 
         do {
             System.out.print("Select the order type (ask/bid): ");
@@ -382,14 +404,14 @@ public class CrossClientMain {
             System.out.println("2. Bid");
             type = console.readLine();
             switch (type) {
-                case "1":
-                    type = "ask";
-                    break;
-                case "2":
-                    type = "bid";
-                    break;
-                default:
-                    System.out.println("Command not recognized.Please select a valid type.");
+            case "1":
+                type = "ask";
+                break;
+            case "2":
+                type = "bid";
+                break;
+            default:
+                System.out.println("Command not recognized.Please select a valid type.");
             }
 
         } while ((!type.equals("ask") && !type.equals("bid")) || type.isEmpty());
@@ -406,32 +428,20 @@ public class CrossClientMain {
             }
         } while (size <= 0);
 
-        do {
-            System.out.print("Price: ");
-            try {
-                price = Long.parseLong(console.readLine());
-                if (price <= 0) {
-                    System.out.println("Price must be a positive number.");
-                }
-            } catch (NumberFormatException e) {
-                System.out.println("Invalid input. Please enter a valid number.");
-            }
-        } while (price <= 0);
-
         int numPort = datagramSocket.getLocalPort();
 
-        String request = gson
-                .toJson(Map.of("operation", "insertMarketOrder", "values",
-                        Map.of("userId", usernameLoggedIn, "udpPort", numPort,
-                                "type", type, "size", size)));
+        String request = gson.toJson(Map.of("operation", "insertMarketOrder", "values",
+                Map.of("userId", usernameLoggedIn, "udpPort", numPort, "type", type, "size", size)));
         output.println(request);
 
         // Response parsing
         String response = input.readLine();
         JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-        if (jsonResponse.has("orderId") && jsonResponse.has("newUserSession")) {
+        if (jsonResponse.has("orderId")) {
             int orderId = jsonResponse.get("orderId").getAsInt();
-            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            if (jsonResponse.has("newUserSession")) {
+                userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            }
             System.out.println("[!] orderId: " + orderId);
         }
     }
@@ -451,14 +461,14 @@ public class CrossClientMain {
             System.out.println("2. Bid");
             type = console.readLine();
             switch (type) {
-                case "1":
-                    type = "ask";
-                    break;
-                case "2":
-                    type = "bid";
-                    break;
-                default:
-                    System.out.println("Command not recognized. Please select a valid type.");
+            case "1":
+                type = "ask";
+                break;
+            case "2":
+                type = "bid";
+                break;
+            default:
+                System.out.println("Command not recognized. Please select a valid type.");
             }
 
         } while ((!type.equals("ask") && !type.equals("bid")) || type.isEmpty());
@@ -489,17 +499,18 @@ public class CrossClientMain {
 
         int numPort = datagramSocket.getLocalPort();
 
-        String request = gson.toJson(
-                Map.of("operation", "insertStopOrder", "values", Map.of("userId", usernameLoggedIn, "udpPort", numPort,
-                        "type", type, "size", size, "price", price)));
+        String request = gson.toJson(Map.of("operation", "insertStopOrder", "values",
+                Map.of("userId", usernameLoggedIn, "udpPort", numPort, "type", type, "size", size, "price", price)));
         output.println(request);
 
         // Response parsing
         String response = input.readLine();
         JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-        if (jsonResponse.has("orderId") && jsonResponse.has("newUserSession")) {
+        if (jsonResponse.has("orderId")) {
             int orderId = jsonResponse.get("orderId").getAsInt();
-            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            if (jsonResponse.has("newUserSession")) {
+                userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            }
             System.out.println("[!] orderId: " + orderId);
         }
     }
@@ -524,18 +535,19 @@ public class CrossClientMain {
             }
         } while (orderId <= 0);
 
-        String request = gson
-                .toJson(Map.of("operation", "cancelOrder", "values",
-                        Map.of("userId", usernameLoggedIn, "orderId", orderId)));
+        String request = gson.toJson(Map.of("operation", "cancelOrder", "values", Map.of("userId", usernameLoggedIn, "orderId", orderId)));
         output.println(request);
 
         // Response parsing
         String response = input.readLine();
         JsonObject jsonResponse = JsonParser.parseString(response).getAsJsonObject();
-        if (jsonResponse.has("response") && jsonResponse.has("errorMessage") && jsonResponse.has("newUserSession")) {
+        if (jsonResponse.has("response") && jsonResponse.has("errorMessage")) {
             int responseCode = jsonResponse.get("response").getAsInt();
             String errorMessage = jsonResponse.get("errorMessage").getAsString();
-            userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+            if (jsonResponse.has("newUserSession")) {
+                userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
+
+            }
             System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
 
         }
@@ -582,8 +594,7 @@ public class CrossClientMain {
             }
         } while (!validInput);
 
-        String request = gson.toJson(
-                Map.of("operation", "getPriceHistory", "values", Map.of("month", line, "userId", usernameLoggedIn)));
+        String request = gson.toJson(Map.of("operation", "getPriceHistory", "values", Map.of("month", line, "userId", usernameLoggedIn)));
 
         output.println(request);
 
@@ -596,17 +607,20 @@ public class CrossClientMain {
             userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
             System.out.println("[!] Server response code: " + responseCode + " - " + errorMessage);
 
-        } else if (jsonResponse.has("month") && jsonResponse.has("tradeHistory")
-                && jsonResponse.has("newUserSession")) {
+        } else if (jsonResponse.has("month") && jsonResponse.has("tradeHistory") && jsonResponse.has("newUserSession")) {
 
             userSessionTimestamp = jsonResponse.get("newUserSession").getAsLong(); // Update the user session timestamp
             String month = jsonResponse.get("month").getAsString();
-            JsonArray tradeHistory = jsonResponse.get("tradeHistory").getAsJsonArray();
 
-            System.out.println("Price history for month " + month + ":");
-            for (JsonElement trade : tradeHistory) {
-                JsonObject tradeObj = trade.getAsJsonObject();
-                System.out.println("Day: " + tradeObj.get("day").getAsString());
+            SortedMap<String, JsonObject> tradeHistory = new TreeMap<>();
+            Type type = new TypeToken<SortedMap<String, JsonObject>>() {}.getType();
+
+            tradeHistory = gson.fromJson(jsonResponse.get("tradeHistory"), type);
+
+            System.out.println("==========\n Price history for month " + month + ":");
+            for (Map.Entry<String, JsonObject> trade : tradeHistory.entrySet()) {
+                JsonObject tradeObj = trade.getValue();
+                System.out.println("Day: " + tradeObj.get("numberOfDay").getAsString());
                 System.out.println("Opening price: " + tradeObj.get("openingPrice").getAsString());
                 System.out.println("Closing price: " + tradeObj.get("closingPrice").getAsString());
                 System.out.println("Highest price: " + tradeObj.get("highestPrice").getAsString());
@@ -615,12 +629,12 @@ public class CrossClientMain {
                 JsonArray fulfilledOrders = tradeObj.get("fulfilledOrders").getAsJsonArray();
                 for (JsonElement order : fulfilledOrders) {
                     JsonObject orderObj = order.getAsJsonObject();
-                    System.out.println("Order ID: " + orderObj.get("orderId").getAsString());
-                    System.out.println("Type: " + orderObj.get("type").getAsString());
-                    System.out.println("Size: " + orderObj.get("size").getAsString());
-                    System.out.println("Price: " + orderObj.get("price").getAsString());
-                    System.out.println("Timestamp: " + orderObj.get("timestamp").getAsString());
                     System.out.println("-------------");
+                    System.out.println("\tOrder ID: " + orderObj.get("orderId").getAsString());
+                    System.out.println("\tType: " + orderObj.get("type").getAsString());
+                    System.out.println("\tSize: " + orderObj.get("size").getAsString());
+                    System.out.println("\tPrice: " + orderObj.get("price").getAsString());
+                    System.out.println("\tTimestamp: " + orderObj.get("timestamp").getAsString());
                 }
             }
 
@@ -640,22 +654,22 @@ public class CrossClientMain {
         command = console.readLine();
 
         switch (command) {
-            case "1":
-                register(console);
-                break;
-            case "2":
-                login(console);
-                break;
-            case "3":
-                updateCredentials(console);
-                break;
-            case "4":
-                System.out.println("[!] Client closing...");
-                System.exit(0);
-                break;
-            default:
-                System.out.println("Command not recognized.Please select a valid operation.");
-                break;
+        case "1":
+            register(console);
+            break;
+        case "2":
+            login(console);
+            break;
+        case "3":
+            updateCredentials(console);
+            break;
+        case "4":
+            System.out.println("[!] Client closing...");
+            System.exit(0);
+            break;
+        default:
+            System.out.println("Command not recognized.Please select a valid operation.");
+            break;
         }
     }
 
@@ -706,27 +720,27 @@ public class CrossClientMain {
     // Gestione dei comandi
     private void handleCommand(String command, BufferedReader console) throws IOException {
         switch (command) {
-            case "1":
-                insertLimitOrder(console);
-                break;
-            case "2":
-                insertMarketOrder(console);
-                break;
-            case "3":
-                insertStopOrder(console);
-                break;
-            case "4":
-                cancelOrder(console);
-                break;
-            case "5":
-                getPriceHistory(console);
-                break;
-            case "6":
-                logout();
-                break;
-            default:
-                System.out.println("Command not recognized.Please select a valid operation.");
-                break;
+        case "1":
+            insertLimitOrder(console);
+            break;
+        case "2":
+            insertMarketOrder(console);
+            break;
+        case "3":
+            insertStopOrder(console);
+            break;
+        case "4":
+            cancelOrder(console);
+            break;
+        case "5":
+            getPriceHistory(console);
+            break;
+        case "6":
+            logout();
+            break;
+        default:
+            System.out.println("Command not recognized.Please select a valid operation.");
+            break;
         }
     }
 
@@ -735,6 +749,7 @@ public class CrossClientMain {
         try {
             CrossClientMain client = new CrossClientMain();
             client.connectToServer();
+
             client.start();
         } catch (IOException e) {
             System.err.println("Client start on failure: " + e.getMessage());

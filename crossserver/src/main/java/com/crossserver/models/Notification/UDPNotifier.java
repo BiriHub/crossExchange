@@ -29,8 +29,10 @@ public class UDPNotifier {
     }
 
     public void registerUdpClient(String clientId, InetAddress host, int port) {
-        InetSocketAddress udpAddress = new InetSocketAddress(host, port);
-        clientUdpAddresses.put(clientId, udpAddress);
+        if (!clientUdpAddresses.containsKey(clientId)) {
+            InetSocketAddress udpAddress = new InetSocketAddress(host, port);
+            clientUdpAddresses.put(clientId, udpAddress);
+        }
     }
 
     public void notifyClient(String clientId, Order order) {

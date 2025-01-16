@@ -5,6 +5,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.SortedMap;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -50,9 +54,7 @@ public class OrderBook {
             while (!queue.isEmpty()) {
                 StopOrder stopOrder = queue.poll();
 
-                long fulfilledOrderId = matchBidOrder(stopOrder.getOrderId(), stopOrder.getType(),
-                        stopOrder.getSize(),
-                        stopOrder.getUserId());
+                long fulfilledOrderId = matchBidOrder(stopOrder.getOrderId(), stopOrder.getType(), stopOrder.getSize(), stopOrder.getUserId());
                 if (fulfilledOrderId != -1) {
                     // stop order has been executed with no errors
                     stopOrder.setTimestamp(System.currentTimeMillis() / 1000L);
@@ -69,16 +71,15 @@ public class OrderBook {
     }
 
     /*
-     * Activate sell stop orders when the price changes
+     * Activate sell stop orders when the price changes in the limit
      */
     private void activateSellStopOrders(long currentPrice) {
+
         // Activate stop-sell
-        stopAskOrders.tailMap(currentPrice, false).forEach((price, queue) -> {
+        stopAskOrders.tailMap(currentPrice, true).forEach((price, queue) -> {
             while (!queue.isEmpty()) {
                 StopOrder stopOrder = queue.poll();
-                long fulfilledOrderId = matchAskOrder(stopOrder.getOrderId(), stopOrder.getType(),
-                        stopOrder.getSize(),
-                        stopOrder.getUserId());
+                long fulfilledOrderId = matchAskOrder(stopOrder.getOrderId(), stopOrder.getType(), stopOrder.getSize(), stopOrder.getUserId());
                 if (fulfilledOrderId != -1) {
                     // stop order has been executed correttamente
                     stopOrder.setTimestamp(System.currentTimeMillis() / 1000L);
@@ -106,8 +107,7 @@ public class OrderBook {
     }
 
     /*
-     * Insert a market order in the order book in order to execute it and fulfill
-     * the request
+     * Insert a market order in the order book in order to execute it and fulfill the request
      * return the order ID or -1 if the order was not executed
      */
     public long insertMarketOrder(long orderId, String type, long size, String userId) {
@@ -125,6 +125,7 @@ public class OrderBook {
         // finally create a new market order in order to add it to the order history
         MarketOrder markerOrder = new MarketOrder(orderId, type, size, price);
         markerOrder.setUserId(userId);
+        markerOrder.setTimestamp(System.currentTimeMillis() / 1000L);
 
         // notify the client that the order has been executed
         UdpClientNotifier.notifyClient(userId, markerOrder);
@@ -134,46 +135,88 @@ public class OrderBook {
     }
 
     /*
-     * Execute a buy market order against the sell limit book
-     * return the price of the order or -1 if the order was not executed
+     * Execute a buy market order against the sell limit book at the lowest price return the
+     * price of order or -1 if the order was not possible to execute
      */
-    // TODO : to test
     public long matchBidOrder(long orderId, String type, long size, String userId) {
 
-        // Copy the ask book in order to save the original state of the book in case of
-        // impossibility to fulfill the order
-
-        LimitOrder checkMatchLimitOrder = limitAskOrders.get(limitAskOrders.firstKey()).peek();
-
-        // if the sell limit book is empty or the first order is not enough to fulfill
-        // the market order it returns -1 (error)
-        if (checkMatchLimitOrder == null || checkMatchLimitOrder.getSize() < size) {
+        // the ask limit book is empty, the order can not be executed
+        if (limitAskOrders.entrySet().isEmpty()) {
             return -1;
         }
-        limitAskOrders.pollFirstEntry(); // remove the first entry of the sell limit book
-        long fulfilledLimitOrderPrice = checkMatchLimitOrder.getPrice(); // get the price of the fulfilled limit order
-
-        // set the timestamp of the executed order to the current time to notify the
-        // order has been executed
-        checkMatchLimitOrder.setTimestamp(System.currentTimeMillis() / 1000L);
-
-        // notify the client that the order has been executed
-        UdpClientNotifier.notifyClient(userId, checkMatchLimitOrder);
-        // add the limit order that has been fulfilled to the order history
-        addOrderHistory(checkMatchLimitOrder);
-
-        try {
-            long nextPrice = limitAskOrders.firstKey(); // get the next price in the sell limit book to activate the
-                                                        // stop orders with the new lower sell price
-
-            // Activate buy stop orders when the price changes
-            activateBuyStopOrders(nextPrice);
-
-        } catch (NoSuchElementException e) {
-            // if the sell limit book is empty it means that the order has been executed
-            // and there are no more orders to fulfill
+        // extract the list of limit order with the lowest price in the sell limit book
+        ConcurrentLinkedQueue<LimitOrder> lowestPriceLimitOrders = limitAskOrders.get(limitAskOrders.firstKey());
+        // the market order can not be executed if the sell limit book is empty
+        if (lowestPriceLimitOrders == null) {
+            limitAskOrders.pollFirstEntry(); // remove the first entry of the sell limit book
+            return -1;
         }
 
+        long totalSize = 0;
+
+        synchronized (lowestPriceLimitOrders) {
+            // calculate the total size of the limit orders with the lowest price
+            totalSize = lowestPriceLimitOrders.stream().mapToLong(LimitOrder::getSize).sum();
+        }
+
+        // the market order can not be executed at the lowest price if the total size of the limit
+        // orders is less the its size
+        if (totalSize < size) {
+            return -1;
+        }
+
+        long remainingMarketOrderSize = size;
+
+        long fulfilledLimitOrderPrice = limitAskOrders.firstKey(); // get the price of lowest limit order in the sell limit book
+
+        while (remainingMarketOrderSize > 0) {
+
+            // extract the oldest limit order with the lowest price
+            LimitOrder checkMatchLimitOrder = lowestPriceLimitOrders.peek();
+
+            if (checkMatchLimitOrder.getSize() <= remainingMarketOrderSize) {
+
+                remainingMarketOrderSize -= checkMatchLimitOrder.getSize();
+                totalSize -= checkMatchLimitOrder.getSize();
+
+                // remove the fulfilled limit order from the sell limit book
+                lowestPriceLimitOrders.poll();
+
+                // set the timestamp of the executed order to the current time to notify the order has
+                // been executed
+                checkMatchLimitOrder.setTimestamp(System.currentTimeMillis() / 1000L);
+
+                // notify the owner of the fulfilled limit order that it has been executed
+                UdpClientNotifier.notifyClient(checkMatchLimitOrder.getUserId(), checkMatchLimitOrder);
+
+                // add the limit order that has been fulfilled to the order history
+                addOrderHistory(checkMatchLimitOrder);
+                // if the total size of the limit orders with the lowest price is 0 it means that the
+                // order list has been emptied thanks to the market order
+                // and now it is necessary to activate the stop orders linked to the new lower sell price
+                if (totalSize == 0) {
+                    // remove the previous entry linked to the lowest price in the sell limit book that now it
+                    // has been emptied
+                    limitAskOrders.pollFirstEntry();
+
+                    try {
+                        // get the next price in the sell limit book to activate the stop orders with the new
+                        // lower sell price
+                        long nextPrice = limitAskOrders.firstKey();
+
+                        // Activate buy stop orders when the price changes
+                        activateBuyStopOrders(nextPrice);
+
+                    } catch (NoSuchElementException e) {
+                        // if the sell limit book is empty it means that the order has been executed
+                        // and there are no more orders to fulfill
+                    }
+                }
+            } else {
+                checkMatchLimitOrder.setSize(checkMatchLimitOrder.getSize() - remainingMarketOrderSize);
+                remainingMarketOrderSize = 0;
+            }
+        }
         return fulfilledLimitOrderPrice;
     }
 
@@ -183,51 +226,103 @@ public class OrderBook {
         return order.getOrderId();
     }
 
-    // Execute a sell order against the buy book
     /*
-     * Execute a sell market order against the buy limit book
-     * return the price at which the market order has been closed (that it is equal
-     * to price of the fulfilled limit order in the order book) or -1 if the order
-     * was not executed
+     * Execute a sell market order against the buy limit book return the price at which the
+     * market order has been closed (that it is equal to price of the fulfilled limit order in
+     * the order book) or -1 if the order was not executed
      */
     // TODO : to test
     public long matchAskOrder(long orderId, String type, long size, String userId) {
 
-        LimitOrder checkMatchLimitOrder = limitBidOrders.get(limitBidOrders.firstKey()).peek();
-
-        // if the buy limit book is empty or the first order is not enough to fulfill
-        // the market order it returns -1 (error)
-        if (checkMatchLimitOrder == null || checkMatchLimitOrder.getSize() < size) {
+        // the buy limit book is empty, the order can not be executed
+        if (limitBidOrders.entrySet().isEmpty()) {
             return -1;
         }
-        limitBidOrders.pollFirstEntry(); // remove the first entry of the buy limit book
-        long fulfilledLimitOrderPrice = checkMatchLimitOrder.getPrice(); // get the price of the fulfilled limit order
 
-        // set the timestamp of the executed order to the current time to notify the
-        // order has been executed
-        checkMatchLimitOrder.setTimestamp(System.currentTimeMillis() / 1000L);
+        // extract the list of limit order with the highest price in the buy limit book
+        ConcurrentLinkedQueue<LimitOrder> highestPriceLimitOrders = limitBidOrders.get(limitBidOrders.firstKey());
 
-        // notify the client that the order has been executed
-        UdpClientNotifier.notifyClient(userId, checkMatchLimitOrder);
+        // the market order can not be executed if the buy limit book is empty
+        if (highestPriceLimitOrders == null) {
+            limitBidOrders.pollFirstEntry(); // remove the first entry of the buy limit book
+            return -1;
+        }
 
-        addOrderHistory(checkMatchLimitOrder); // add the limit order to the order history
-        try {
+        long totalSize = 0;
 
-            long nextPrice = limitBidOrders.firstKey(); // get the next price in the buy limit book to activate the stop
-                                                        // orders with the new higher buy price
+        synchronized (highestPriceLimitOrders) {
+            // calculate the total size of the limit orders with the highest price
+            totalSize = highestPriceLimitOrders.stream().mapToLong(LimitOrder::getSize).sum();
+        }
 
-            // Activate sell stop orders when the price changes
-            activateSellStopOrders(nextPrice);
+        // the market order can not be executed at the highest price if the total size of the
+        // limit
+        // orders is less the its size
+        if (totalSize < size) {
+            return -1;
+        }
 
-        } catch (NoSuchElementException e) {
-            // if the buy limit book is empty it means that the order has been executed
-            // and there are no more orders to fulfill
+        long remainingMarketOrderSize = size;
+
+        long fulfilledLimitOrderPrice = limitBidOrders.firstKey(); // get the price of highest limit order in the buy limit book
+
+        while (remainingMarketOrderSize > 0) {
+
+            // extract the oldest limit order with the highest price
+            LimitOrder checkMatchLimitOrder = highestPriceLimitOrders.peek();
+
+            if (checkMatchLimitOrder.getSize() <= remainingMarketOrderSize) {
+
+                remainingMarketOrderSize -= checkMatchLimitOrder.getSize();
+                totalSize -= checkMatchLimitOrder.getSize();
+
+                // remove the fulfilled limit order from the buy limit book
+                highestPriceLimitOrders.poll();
+
+                // set the timestamp of the executed order to the current time to notify the order has
+                checkMatchLimitOrder.setTimestamp(System.currentTimeMillis() / 1000L);
+
+                // notify the owner of the fulfilled limit order that it has been executed
+                UdpClientNotifier.notifyClient(checkMatchLimitOrder.getUserId(), checkMatchLimitOrder);
+
+                // add the limit order that has been fulfilled to the order history
+                addOrderHistory(checkMatchLimitOrder);
+
+                // if the total size of the limit orders with the highest price is 0 it means that the
+                // order list has been emptied thanks to the market order
+                // and now it is necessary to activate the stop orders linked to the new higher buy price
+
+                if (totalSize == 0) {
+                    // remove the previous entry linked to the highest price in the buy limit book that now it
+                    // has been emptied
+                    limitBidOrders.pollFirstEntry();
+
+                    try {
+                        // get the next price in the buy limit book to activate the stop orders with the new
+                        // higher buy price
+                        long nextPrice = limitBidOrders.firstKey();
+
+                        // Activate sell stop orders when the price changes
+                        activateSellStopOrders(nextPrice);
+
+                    } catch (NoSuchElementException e) {
+                        // if the buy limit book is empty it means that the order has been executed
+                        // and there are no more orders to fulfill
+                    }
+                }
+            } else {
+                checkMatchLimitOrder.setSize(checkMatchLimitOrder.getSize() - remainingMarketOrderSize);
+                remainingMarketOrderSize = 0;
+            }
         }
 
         return fulfilledLimitOrderPrice;
     }
 
-    // Cancel an order from the order book
+    /*
+     * Cancel an order from the order book given its ID, return the order ID if the order is
+     * in one of the data structures, -1 otherwise
+     */
     public long cancelOrder(long orderId) {
         if (cancelOrderFromBook(limitAskOrders, orderId))
             return orderId;
@@ -240,14 +335,21 @@ public class OrderBook {
         return -1; // Return -1 if the order was not found in any book
     }
 
-    private boolean cancelOrderFromBook(
-            ConcurrentSkipListMap<Long, ? extends ConcurrentLinkedQueue<? extends Order>> book, long orderId) {
+    /* 
+     * Search for the order specified by its ID in the data structure passed as parameter, if found then it is removed and return true, false otherwise
+     */
+    private boolean cancelOrderFromBook(ConcurrentSkipListMap<Long, ? extends ConcurrentLinkedQueue<? extends Order>> book, long orderId) {
         AtomicBoolean removed = new AtomicBoolean(false);
 
         synchronized (book) {
-            book.values().forEach(queue -> {
+            book.entrySet().forEach(entry -> {
+                ConcurrentLinkedQueue<? extends Order> queue = entry.getValue();
                 if (queue.removeIf(order -> order.getOrderId() == orderId)) {
                     removed.set(true);
+                    // if removing the oerder from the queue makes it empty, remove the entry from the book
+                    if (queue.isEmpty()) {
+                        book.remove(entry.getKey());
+                    }
                 }
             });
         }
@@ -255,7 +357,11 @@ public class OrderBook {
         return removed.get();
     }
 
+    /*
+     * Search the order in the order book from its ID and return it if found, null otherwise
+     */
     public Order getOrder(long orderId) {
+
         Order order = findOrderInBook(limitAskOrders, orderId);
         if (order != null)
             return order;
@@ -268,13 +374,30 @@ public class OrderBook {
         if (order != null)
             return order;
 
-        return findOrderInBook(stopBidOrders, orderId);
+        order = findOrderInBook(stopBidOrders, orderId);
+        if (order != null)
+            return order;
+
+        // create a copy of the order history instead of directly accessing it to avoid costful
+        // synchronization
+        ConcurrentLinkedQueue<Order> copyOrderHistory = new ConcurrentLinkedQueue<>();
+
+        synchronized (orderHistory) {
+            copyOrderHistory.addAll(orderHistory);
+        }
+
+        // search for the order in the copy of the order history
+        for (Order orderInHistory : copyOrderHistory) {
+            if (orderInHistory.getOrderId() == orderId) {
+                return orderInHistory;
+            }
+        }
+        return null;
     }
 
     // Find an order in the specified data structure given its ID , return the order
     // if found, null otherwise
-    private Order findOrderInBook(ConcurrentSkipListMap<Long, ? extends ConcurrentLinkedQueue<? extends Order>> book,
-            long orderId) {
+    private Order findOrderInBook(ConcurrentSkipListMap<Long, ? extends ConcurrentLinkedQueue<? extends Order>> book, long orderId) {
 
         synchronized (book) {
             for (ConcurrentLinkedQueue<? extends Order> queue : book.values()) {
@@ -289,31 +412,38 @@ public class OrderBook {
         return null;
     }
 
-    public ConcurrentSkipListMap<String, TradeHistory> getOrderHistory(long startOfMonth,
-            long endOfMonth) {
+    public ConcurrentSkipListMap<String, TradeHistory> getOrderHistory(long startOfMonth, long endOfMonth) {
         List<Order> orderHistoryByMonth;
         Map<Long, List<Order>> ordersPerDay;
         synchronized (orderHistory) {
             orderHistoryByMonth = orderHistory.stream().filter(order -> {
                 long orderDateTimestamp = order.getTimestamp();
                 return orderDateTimestamp >= startOfMonth && orderDateTimestamp <= endOfMonth;
-            }).sorted(Comparator.comparing(ord -> ord.getTimestamp()))
-                    .collect(Collectors.toList());
+            }).sorted(Comparator.comparing(ord -> ord.getTimestamp())).collect(Collectors.toList());
             ordersPerDay = orderHistoryByMonth.stream().collect(Collectors.groupingBy(Order::getTimestamp));
         }
-        ConcurrentSkipListMap<String, TradeHistory> response = new ConcurrentSkipListMap<>();
-        synchronized (ordersPerDay) {
 
-            for (Map.Entry<Long, List<Order>> order : ordersPerDay.entrySet()) {
-                // String date = LocalDate.ofEpochDay(order.getKey()).toString();
-                long openingPrice = order.getValue().get(0).getPrice();
-                long closingPrice = order.getValue().get(order.getValue().size() - 1).getPrice();
-                long highPrice = order.getValue().stream().mapToLong(Order::getPrice).max().getAsLong();
-                long lowPrice = order.getValue().stream().mapToLong(Order::getPrice).min().getAsLong();
+        // Create the map of orders per day sorted by number of day
+        SortedMap<Long, List<Order>> ordersPerDaySorted = new TreeMap<>(ordersPerDay);
+
+        ConcurrentSkipListMap<String, TradeHistory> response = new ConcurrentSkipListMap<>();
+        synchronized (ordersPerDaySorted) {
+
+            for (Map.Entry<Long, List<Order>> order : ordersPerDaySorted.entrySet()) {
+
+                // Sort the orders by timestamp
+                List<Order> orders = order.getValue().stream().sorted(Comparator.comparing(Order::getTimestamp)).collect(Collectors.toList());
+
+                // Extract the opening, closing and search for the high and low price of the day
+                long openingPrice = orders.get(0).getPrice();
+                long closingPrice = orders.get(orders.size() - 1).getPrice();
+                long highPrice = orders.stream().mapToLong(Order::getPrice).max().getAsLong();
+                long lowPrice = orders.stream().mapToLong(Order::getPrice).min().getAsLong();
+
+                // Compute the day of the month
                 int dayOfMonth = LocalDate.ofEpochDay(order.getKey()).getDayOfMonth();
 
-                TradeHistory tradeHistory = new TradeHistory(dayOfMonth, openingPrice, closingPrice, highPrice,
-                        lowPrice, order.getValue());
+                TradeHistory tradeHistory = new TradeHistory(dayOfMonth, openingPrice, closingPrice, highPrice, lowPrice, orders);
                 response.put(Integer.toString(dayOfMonth), tradeHistory);
             }
         }
@@ -321,7 +451,7 @@ public class OrderBook {
         return response;
 
     }
-    
+
     public void setLimitAskOrders(ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitAskOrders) {
         this.limitAskOrders = new ConcurrentSkipListMap<>(limitAskOrders);
     }

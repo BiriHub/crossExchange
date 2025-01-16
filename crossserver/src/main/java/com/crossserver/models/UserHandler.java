@@ -34,8 +34,7 @@ public class UserHandler implements Runnable {
                 PrintWriter output = new PrintWriter(clientSocket.getOutputStream(), true)) {
 
             String request;
-            while (!Thread.currentThread().isInterrupted() && !clientSocket.isClosed()
-                    && (request = input.readLine()) != null) {
+            while (!Thread.currentThread().isInterrupted() && !clientSocket.isClosed() && (request = input.readLine()) != null) {
                 JsonObject jsonRequest = gson.fromJson(request, JsonObject.class);
                 String response = handleRequest(jsonRequest);
                 output.println(response);
@@ -48,7 +47,8 @@ public class UserHandler implements Runnable {
             } catch (IOException e) {
                 System.err.println("Error while closing the connection: " + e.getMessage());
             }
-            server.getSessionManager().logoutUser(username); // remove the user session from the session manager if the client disconnects abruptly without logging out
+            server.getSessionManager().logoutUser(username); // remove the user session from the session manager if the client disconnects abruptly
+                                                             // without logging out
         }
     }
 
@@ -60,34 +60,37 @@ public class UserHandler implements Runnable {
             String operation = request.get("operation").getAsString();
 
             switch (operation) {
-                case "register": // register
-                    return server.register(request);
-                case "updateCredentials": // update credentials
-                    return server.updateCredentials(request);
-                case "login": // Login
-                    Map<String,Object> loginResponse = new HashMap<>(server.login(request, this));
-                    
+            case "register": // register
+                return server.register(request);
+            case "updateCredentials": // update credentials
+                return server.updateCredentials(request);
+            case "login": // Login
+                Map<String, Object> loginResponse = new HashMap<>(server.login(request, this));
+
+                // if the login was successful, store the username in the session
+                if (loginResponse.containsKey("userId")) {
                     username = loginResponse.get("userId").toString(); // store the username in the session
                     loginResponse.remove("userId"); // remove the username from the response
-                    return gson.toJson(loginResponse); // remove username from response and return the formatted response to the client
+                }
+                return gson.toJson(loginResponse); // remove username from response and return the formatted response to the client
 
-                case "logout": // Logout
-                    String logoutResponse=server.logout(request, this);
-                    username=null; // remove the username from the session
-                    return logoutResponse;
-                
-                case "3": // add limit order
-                    return server.handleLimitOrderRequest(request,clientSocket);
-                case "4": // add market order
-                    return server.handleMarketOrderRequest(request,clientSocket);
-                case "5": // add stop order
-                    return server.handleStopOrderRequest(request,clientSocket);
-                case "6": // cancel order
-                    return server.cancelOrder(request);
-                case "7": // get order book history
-                    return server.getPriceHistory(request);
-                default: // error
-                    return gson.toJson(Map.of("response", -1, "errorMessage", "Operation not recognized"));
+            case "logout": // Logout
+                String logoutResponse = server.logout(request, this);
+                username = null; // remove the username from the session
+                return logoutResponse;
+
+            case "insertLimitOrder": // add limit order
+                return server.handleLimitOrderRequest(request, clientSocket);
+            case "insertMarketOrder": // add market order
+                return server.handleMarketOrderRequest(request, clientSocket);
+            case "insertStopOrder": // add stop order
+                return server.handleStopOrderRequest(request, clientSocket);
+            case "cancelOrder": // cancel order
+                return server.cancelOrder(request);
+            case "getPriceHistory": // get order book history
+                return server.getPriceHistory(request);
+            default: // error
+                return gson.toJson(Map.of("response", -1, "errorMessage", "Operation not recognized"));
             }
         } catch (Exception e) {
             return gson.toJson(Map.of("response", -1, "errorMessage", "Internal server error: " + e.getMessage()));

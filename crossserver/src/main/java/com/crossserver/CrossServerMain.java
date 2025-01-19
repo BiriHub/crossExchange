@@ -10,7 +10,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.lang.reflect.Type;
-
 import com.crossserver.models.*;
 import com.crossserver.models.Notification.UDPNotifier;
 import com.crossserver.models.Orders.LimitOrder;
@@ -22,7 +21,6 @@ import com.crossserver.models.Orders.TradeHistory;
 import com.crossserver.models.Session.SessionManager;
 import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
-
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -31,19 +29,21 @@ import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Map;
 import java.util.Properties;
 
+/*
+ * The main class of the server
+ */
 public class CrossServerMain {
 
     private static final String CONFIG_FILE = "server.properties"; // Configuration file
     private static final String USERS_DB = "usersDB.json"; // User database file
-    private static final String ORDER_HISTORY_DB = "storicoOrdiniProf.json";// "data/orderHistoryDB.json"; // order
-                                                                            // history database file
+    private static final String ORDER_HISTORY_DB = "orderHistoryDB.json"; // order history database file
     private static final String LIMIT_ORDER_DB = "limitDB.json"; // not executed limit order database file
     private static final String STOP_ORDER_DB = "stopDB.json"; // not executed stop order database file
-    private static final String DEFAULT_FILE_PATH = "crossserver/src/main/java/com/crossserver/data/"; // default file path
-
+    private static final String DEFAULT_FILE_PATH = "src/main/java/com/crossserver/data/"; // default file path
     private final ScheduledExecutorService DBpersistenceExecutor; // Database persistence executor: used to save the
                                                                   // databases periodically
 
@@ -57,12 +57,12 @@ public class CrossServerMain {
     private int serverPort; // Server port
     private long maxSessionTime; // Maximum user session time
 
-    private final ExecutorService threadPool;
-    private long maxThreadPoolTerminationTime;
-    private long periodicallySaveDB;
+    private final ExecutorService threadPool; // Thread pool for handling user requests
+    private long maxThreadPoolTerminationTime; // Maximum time to wait for the thread pool to terminate in milliseconds
+    private long periodicallySaveDB; // Periodic database persistence time in milliseconds
 
-    private final SessionManager sessionManager;
-    private final Gson gson;
+    private final SessionManager sessionManager; // Session manager used to manage user sessions
+    private final Gson gson; // Gson object used to serialize and deserialize JSON objects
 
     public CrossServerMain() {
         // Load the default configuration and connect to the server
@@ -77,7 +77,7 @@ public class CrossServerMain {
         // Default initialization of the order book
         notifier = new UDPNotifier();
         orderBook = new OrderBook(notifier);
-        // activeUserConnections = new ConcurrentHashMap<>();
+
         orderIdCounter = new AtomicLong(0);
 
         // thread pool initialization
@@ -108,7 +108,8 @@ public class CrossServerMain {
             // thread pool shutdown
             threadPool.shutdown();
             try {
-                // Wait ""maxThreadPoolTerminationTime" milliseconds for the thread pool to terminate
+                // Wait ""maxThreadPoolTerminationTime" milliseconds for the thread pool to
+                // terminate
                 if (!threadPool.awaitTermination(maxThreadPoolTerminationTime, TimeUnit.MILLISECONDS))
                     threadPool.shutdownNow();
             } catch (InterruptedException e) {
@@ -117,17 +118,19 @@ public class CrossServerMain {
             // save the server state before shutting down
             saveDatabases();
             System.out.println("Server state saved successfully");
-            // interrupt the current thread
-            Thread.currentThread().interrupt();
         }));
     }
 
-    public SessionManager getSessionManager() {
+    /*
+     * Return the session manager
+     */
+    public synchronized SessionManager getSessionManager() {
         return sessionManager;
     }
 
     /*
-     * Periodically save the server databases
+     * Periodically save the server databases according to the time specified in the
+     * configuration file
      */
     public void startPeriodicPersistence() {
         DBpersistenceExecutor.scheduleAtFixedRate(() -> {
@@ -138,8 +141,10 @@ public class CrossServerMain {
             } catch (Exception e) {
                 System.err.println("[ERROR] Periodic persistence failed: " + e.getMessage());
             }
-        }, periodicallySaveDB, periodicallySaveDB, TimeUnit.MILLISECONDS); // execute the task every "periodicallySaveDB"
-        // seconds according the configuration file
+        }, periodicallySaveDB, periodicallySaveDB, TimeUnit.MILLISECONDS); // execute the task every
+                                                                           // "periodicallySaveDB" seconds according
+                                                                           // the configuration file
+
     }
 
     /*
@@ -147,14 +152,17 @@ public class CrossServerMain {
      * 
      */
     private void loadConfiguration() {
+        // Load the configuration file
         try (InputStream configFileStream = getClass().getClassLoader().getResourceAsStream(CONFIG_FILE)) {
             Properties config = new Properties();
             config.load(configFileStream);
             serverPort = Integer.parseInt(config.getProperty("port")); // extract the port from the configuration file
-            maxSessionTime = Long.parseLong(config.getProperty("sessionTime")); // extract the maximum session time
-                                                                                // from the configuration file
-            String serverAddress = config.getProperty("address"); // extract the server address from the configuration
-                                                                  // file
+
+            // extract the maximum session time from the configuration file
+            maxSessionTime = Long.parseLong(config.getProperty("sessionTime"));
+
+            // extract the server address from the configuration file
+            String serverAddress = config.getProperty("address");
             // extract the maximum thread pool size from the configuration file
             maxThreadPoolTerminationTime = Long.parseLong(config.getProperty("threadPoolTerminationTime"));
             periodicallySaveDB = Long.parseLong(config.getProperty("intervalSaveDB"));
@@ -171,25 +179,30 @@ public class CrossServerMain {
     }
 
     /*
-     * Save the server databases: the user database, the order history, the limit orders and
-     * the stop orders. The information are saved in JSON format periodically and when the
+     * Save the server databases: the user database, the order history, the limit
+     * orders and
+     * the stop orders. The information are saved in JSON format periodically and
+     * when the
      * server is preparing to shut down
      */
     private void saveDatabases() {
         // Save the user database
         saveToFile(USERS_DB, usersDB);
         // Save the order history
-        saveToFile(ORDER_HISTORY_DB, Map.of("orderIdCounter", orderIdCounter.get(), "trades", orderBook.getOrderHistory()));
+        saveToFile(ORDER_HISTORY_DB,
+                Map.of("orderIdCounter", orderIdCounter.get(), "trades", orderBook.getOrderHistory()));
         // Save the limit orders (bid and ask)
-        saveToFile(LIMIT_ORDER_DB, Map.of("limitAskOrders", orderBook.getLimitAskOrders(), "limitBidOrders", orderBook.getLimitBidOrders()));
+        saveToFile(LIMIT_ORDER_DB, Map.of("limitAskOrders", orderBook.getLimitAskOrders(), "limitBidOrders",
+                orderBook.getLimitBidOrders()));
         // Save the stop orders (bid and ask)
-        saveToFile(STOP_ORDER_DB, Map.of("stopAskOrders", orderBook.getStopAskOrders(), "stopBidOrders", orderBook.getStopBidOrders()));
+        saveToFile(STOP_ORDER_DB,
+                Map.of("stopAskOrders", orderBook.getStopAskOrders(), "stopBidOrders", orderBook.getStopBidOrders()));
     }
 
     /*
      * Save the data structure in the file in JSON format
      */
-    private void saveToFile(String filename, Map<String, ?> data) {
+    private synchronized void saveToFile(String filename, Map<String, ?> data) {
         File dbDirectory = new File(DEFAULT_FILE_PATH);
         // check if the directory exists, otherwise create it
         if (!dbDirectory.exists()) {
@@ -205,8 +218,10 @@ public class CrossServerMain {
     }
 
     /*
-     * Load the server databases: the user database, the order history, the limit orders and
-     * the stop orders. The information are loaded from the JSON files when the server is
+     * Load the server databases: the user database, the order history, the limit
+     * orders and
+     * the stop orders. The information are loaded from the JSON files when the
+     * server is
      * started
      */
     private void loadDatabases() {
@@ -220,26 +235,35 @@ public class CrossServerMain {
         loadStopOrders(STOP_ORDER_DB);
     }
 
+    /*
+     * Load the user database from the file in JSON format
+     */
     private void loadUserDB(String filename) {
         String filePath = new StringBuilder(DEFAULT_FILE_PATH).append(filename).toString();
         File userFile = new File(filePath);
+        // check if the file exists otherwise create a new file
         if (!userFile.exists()) {
-            System.out.println("[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
+            System.out.println(
+                    "[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
             // let create a new file for the user database
             saveToFile(filename, Collections.emptyMap());
             return;
         }
-
+        // load the user database from the file
         try (BufferedReader reader = new BufferedReader(new FileReader(userFile))) {
             Type type = new TypeToken<Map<String, String>>() {
             }.getType();
+
             Map<String, String> map = gson.fromJson(reader, type);
             if (map != null) {
-                usersDB.putAll(map); // copy data to the usersDB
+                synchronized (usersDB) {
+                    usersDB.putAll(map); // copy data to the usersDB
+                }
                 System.out.println("[Configuration loading] State loaded successfully from " + filename);
             }
         } catch (FileNotFoundException e) {
-            System.out.println("[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
+            System.out.println(
+                    "[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
         } catch (JsonSyntaxException e) {
             System.err.println("[Configuration loading] Error loading state from file: " + e.getMessage());
         } catch (IOException e) {
@@ -247,17 +271,23 @@ public class CrossServerMain {
         }
     }
 
+    /*
+     * Load the order history from the file in JSON format
+     */
+
     private void loadOrderHistory(String filename) {
 
         String filePath = new StringBuilder(DEFAULT_FILE_PATH).append(filename).toString();
         File orderHistoryFile = new File(filePath);
+        // check if the file exists otherwise create a new file
         if (!orderHistoryFile.exists()) {
-            System.out.println("[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
+            System.out.println(
+                    "[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
             // let create a new file for the user database
             saveToFile(filename, Map.of("orderIdCounter", 0L, "trades", Collections.EMPTY_LIST));
             return;
         }
-
+        // load the order history from the file
         try (BufferedReader reader = new BufferedReader(new FileReader(orderHistoryFile))) {
 
             JsonObject jsonObjectFile = gson.fromJson(reader, JsonObject.class);
@@ -280,15 +310,15 @@ public class CrossServerMain {
                     String orderType = orderJson.get("orderType").getAsString();
 
                     switch (orderType) {
-                    case "market":
-                        order = gson.fromJson(orderJson, MarketOrder.class);
-                        break;
-                    case "limit":
-                        order = gson.fromJson(orderJson, LimitOrder.class);
-                        break;
-                    case "stop":
-                        order = gson.fromJson(orderJson, StopOrder.class);
-                        break;
+                        case "market":
+                            order = gson.fromJson(orderJson, MarketOrder.class);
+                            break;
+                        case "limit":
+                            order = gson.fromJson(orderJson, LimitOrder.class);
+                            break;
+                        case "stop":
+                            order = gson.fromJson(orderJson, StopOrder.class);
+                            break;
                     }
                     if (order != null) {
                         orderHistory.add(order);
@@ -296,7 +326,8 @@ public class CrossServerMain {
                     // extract the maximum order id in the order history
                     maxOrderId = Math.max(maxOrderId, order.getOrderId());
                 }
-                // set the order id counter to the maximum order id in the order history plus one
+                // set the order id counter to the maximum order id in the order history plus
+                // one
                 orderIdCounter = new AtomicLong(maxOrderId + 1);
                 // set the order history of the order book
                 orderBook.setOrderHistory(orderHistory);
@@ -310,7 +341,8 @@ public class CrossServerMain {
             System.out.println("[Configuration loading] State loaded successfully from " + filename);
 
         } catch (FileNotFoundException e) {
-            System.out.println("[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
+            System.out.println(
+                    "[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
             orderIdCounter = new AtomicLong(0);
         } catch (JsonSyntaxException e) {
             System.err.println("[Configuration loading] Error loading state from file: " + e.getMessage());
@@ -319,23 +351,28 @@ public class CrossServerMain {
         }
     }
 
+    /*
+     * Load the limit (bid and ask) orders from the file in JSON format
+     */
     private void loadLimitOrders(String filename) {
 
         String filePath = new StringBuilder(DEFAULT_FILE_PATH).append(filename).toString();
         File limitOrderFile = new File(filePath);
+        // check if the file exists otherwise create a new file
         if (!limitOrderFile.exists()) {
-            System.out.println("[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
+            System.out.println(
+                    "[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
             // let create a new file for the user database
-            saveToFile(filename, Map.of("limitAskOrders", Collections.EMPTY_MAP, "limitBidOrders", Collections.EMPTY_MAP));
+            saveToFile(filename,
+                    Map.of("limitAskOrders", Collections.EMPTY_MAP, "limitBidOrders", Collections.EMPTY_MAP));
             return;
         }
-
+        // load the limit orders from the file
         try (BufferedReader reader = new BufferedReader(new FileReader(limitOrderFile))) {
 
             Type type = new TypeToken<Map<String, Object>>() {
             }.getType();
-            Map<String, Object> map = gson.fromJson(reader, type); // TODO: probabilmente posso ottimizzare la lettura
-                                                                   // utilizzando direttamente un JSONOBJECT
+            Map<String, Object> map = gson.fromJson(reader, type);
 
             if (map != null) {
                 // define the type of the limit order list for the json deserialization
@@ -352,10 +389,12 @@ public class CrossServerMain {
                             .fromJson(gson.toJson(map.get("limitAskOrders")), orderListType);
 
                     synchronized (limitAskOrdersFromJsonFile) {
-                        for (Map.Entry<Long, ConcurrentLinkedQueue<LimitOrder>> entry : limitAskOrdersFromJsonFile.entrySet()) {
+                        for (Map.Entry<Long, ConcurrentLinkedQueue<LimitOrder>> entry : limitAskOrdersFromJsonFile
+                                .entrySet()) {
                             ConcurrentLinkedQueue<LimitOrder> orders = entry.getValue();
                             // extract the maximum order id in the limit ask orders
-                            maxOrderId = Math.max(orders.stream().mapToLong(Order::getOrderId).max().orElse(0), maxOrderId);
+                            maxOrderId = Math.max(orders.stream().mapToLong(Order::getOrderId).max().orElse(0),
+                                    maxOrderId);
                         }
                     }
 
@@ -365,26 +404,37 @@ public class CrossServerMain {
                 // load the limit bid orders
                 if (map.containsKey("limitBidOrders")) {
 
-                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitBidOrdersFromJsonFile = gson
+                    // deserialize the limit bid orders from the JSON file
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> deserializedMap = gson
                             .fromJson(gson.toJson(map.get("limitBidOrders")), orderListType);
 
+                    // create a new concurrent skip list map to store the limit bid orders
+                    ConcurrentSkipListMap<Long, ConcurrentLinkedQueue<LimitOrder>> limitBidOrdersFromJsonFile = new ConcurrentSkipListMap<>(
+                            Comparator.reverseOrder());
+
+                    // copy the limit bid orders from the deserialized map to the new map
+                    limitBidOrdersFromJsonFile.putAll(deserializedMap);
+
                     synchronized (limitBidOrdersFromJsonFile) {
-                        for (Map.Entry<Long, ConcurrentLinkedQueue<LimitOrder>> entry : limitBidOrdersFromJsonFile.entrySet()) {
+                        for (Map.Entry<Long, ConcurrentLinkedQueue<LimitOrder>> entry : limitBidOrdersFromJsonFile
+                                .entrySet()) {
                             ConcurrentLinkedQueue<LimitOrder> orders = entry.getValue();
                             // extract the maximum order id in the limit ask orders
-                            maxOrderId = Math.max(orders.stream().mapToLong(Order::getOrderId).max().orElse(0), maxOrderId);
+                            maxOrderId = Math.max(orders.stream().mapToLong(Order::getOrderId).max().orElse(0),
+                                    maxOrderId);
                         }
                     }
                     orderBook.setLimitBidOrders(limitBidOrdersFromJsonFile);
                 }
 
                 // set the order id counter to the maximum order id in the limit orders plus one
-                orderIdCounter = new AtomicLong(Math.max(maxOrderId, orderIdCounter.get()-1) + 1);
+                orderIdCounter = new AtomicLong(Math.max(maxOrderId, orderIdCounter.get() - 1) + 1);
 
                 System.out.println("[Configuration loading] State loaded successfully from " + filename);
             }
         } catch (FileNotFoundException e) {
-            System.out.println("[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
+            System.out.println(
+                    "[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
         } catch (JsonSyntaxException e) {
             System.err.println("[!] Error loading state from file: " + e.getMessage());
         } catch (IOException e) {
@@ -392,17 +442,23 @@ public class CrossServerMain {
         }
     }
 
+    /*
+     * Load the stop (bid and ask) orders from the file in JSON format
+     */
     private void loadStopOrders(String filename) {
 
         String filePath = new StringBuilder(DEFAULT_FILE_PATH).append(filename).toString();
         File stopOrderFile = new File(filePath);
+        // check if the file exists otherwise create a new file
         if (!stopOrderFile.exists()) {
-            System.out.println("[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
+            System.out.println(
+                    "[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
             // let create a new file for the user database
-            saveToFile(filename, Map.of("stopAskOrders", Collections.EMPTY_MAP, "stopBidOrders", Collections.EMPTY_MAP));
+            saveToFile(filename,
+                    Map.of("stopAskOrders", Collections.EMPTY_MAP, "stopBidOrders", Collections.EMPTY_MAP));
             return;
         }
-
+        // load the stop orders from the file
         try (BufferedReader reader = new BufferedReader(new FileReader(stopOrderFile))) {
 
             Type type = new TypeToken<Map<String, Object>>() {
@@ -423,10 +479,12 @@ public class CrossServerMain {
                             .fromJson(gson.toJson(map.get("stopAskOrders")), orderListType);
 
                     synchronized (stopAskOrdersFromJsonFile) {
-                        for (Map.Entry<Long, ConcurrentLinkedQueue<StopOrder>> entry : stopAskOrdersFromJsonFile.entrySet()) {
+                        for (Map.Entry<Long, ConcurrentLinkedQueue<StopOrder>> entry : stopAskOrdersFromJsonFile
+                                .entrySet()) {
                             ConcurrentLinkedQueue<StopOrder> orders = entry.getValue();
                             // extract the maximum order id in the limit ask orders
-                            maxOrderId = Math.max(orders.stream().mapToLong(Order::getOrderId).max().orElse(0), maxOrderId);
+                            maxOrderId = Math.max(orders.stream().mapToLong(Order::getOrderId).max().orElse(0),
+                                    maxOrderId);
                         }
                     }
 
@@ -440,10 +498,12 @@ public class CrossServerMain {
                             .fromJson(gson.toJson(map.get("stopBidOrders")), orderListType);
 
                     synchronized (stopBidOrdersFromJsonFile) {
-                        for (Map.Entry<Long, ConcurrentLinkedQueue<StopOrder>> entry : stopBidOrdersFromJsonFile.entrySet()) {
+                        for (Map.Entry<Long, ConcurrentLinkedQueue<StopOrder>> entry : stopBidOrdersFromJsonFile
+                                .entrySet()) {
                             ConcurrentLinkedQueue<StopOrder> orders = entry.getValue();
                             // extract the maximum order id in the limit ask orders
-                            maxOrderId = Math.max(orders.stream().mapToLong(Order::getOrderId).max().orElse(0), maxOrderId);
+                            maxOrderId = Math.max(orders.stream().mapToLong(Order::getOrderId).max().orElse(0),
+                                    maxOrderId);
                         }
                     }
 
@@ -451,12 +511,13 @@ public class CrossServerMain {
                 }
 
                 // set the order id counter to the maximum order id in the limit orders plus one
-                orderIdCounter = new AtomicLong(Math.max(maxOrderId, orderIdCounter.get()-1) + 1);
+                orderIdCounter = new AtomicLong(Math.max(maxOrderId, orderIdCounter.get() - 1) + 1);
 
                 System.out.println("[Configuration loading] State loaded successfully from " + filename);
             }
         } catch (FileNotFoundException e) {
-            System.out.println("[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
+            System.out.println(
+                    "[Configuration loading] No previous state file found, starting fresh of \"" + filename + "\"");
         } catch (JsonSyntaxException e) {
             System.err.println("[!] Error loading state from file: " + e.getMessage());
         } catch (IOException e) {
@@ -464,11 +525,15 @@ public class CrossServerMain {
         }
     }
 
+    /*
+     * Hash the password using the SHA-256 algorithm and return the hashed password
+     */
     private String hashPassword(String password) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] encodedHash = digest.digest(password.getBytes(StandardCharsets.UTF_8));
             StringBuilder hexString = new StringBuilder();
+            // convert the byte array to a hexadecimal string
             for (byte b : encodedHash) {
                 String hex = Integer.toHexString(0xff & b); // ensures that the byte is treated as an unsigned value.
                 if (hex.length() == 1) {
@@ -492,14 +557,20 @@ public class CrossServerMain {
         }
     }
 
-    // Registrazione utente
+    /*
+     * Register a new user the method returns a JSON string containing the response
+     * code and
+     * the error message to be forwarded to the client
+     */
     public String register(JsonObject request) {
-
+        // check if the request contains the operation and values fields
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
+        // check if the request contains the username and password fields in the values
+        // object
         if (!values.has("username") || !values.has("password")) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "Missing parameters"));
         }
@@ -507,12 +578,12 @@ public class CrossServerMain {
         String username = values.get("username").getAsString();
         String password = values.get("password").getAsString();
 
+        // check if the username and password are empty
         if (username.isEmpty() || password.isEmpty()) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "User parameter not found"));
         }
 
         // check if the password matches the pattern
-        // TODO to test
         if (!checkPassword(password)) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid password"));
         }
@@ -526,20 +597,29 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
 
+    /*
+     * Check if the password matches the regular expression pattern
+     */
     private boolean checkPassword(String password) {
         /*
-         * ^ represents starting character of the string. (?=.*[0-9]) represents a digit must
-         * occur at least once. (?=.*[a-z]) represents a lower case alphabet must occur at least
-         * once. (?=.*[A-Z]) represents an upper case alphabet that must occur at least once.
-         * (?=\\S+$) white spaces don’t allowed in the entire string. .{8, 20} represents at least
+         * ^ represents starting character of the string. (?=.*[0-9]) represents a digit
+         * must
+         * occur at least once. (?=.*[a-z]) represents a lower case alphabet must occur
+         * at least
+         * once. (?=.*[A-Z]) represents an upper case alphabet that must occur at least
+         * once.
+         * (?=\\S+$) white spaces don’t allowed in the entire string. .{8, 20}
+         * represents at least
          * 8 characters and at most 20 characters. $ represents the end of the string.
          */
         String pattern = "^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=\\S+$).{8,20}$";
         return password.matches(pattern);
     }
 
-    // Update user credentials
-    // tested and working
+    /*
+     * Update the user credentials the method returns a JSON string containing the
+     * response
+     */
     public String updateCredentials(JsonObject request) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("response", 105, "errorMessage", "Missing parameters"));
@@ -556,17 +636,19 @@ public class CrossServerMain {
 
         String user_password = usersDB.get(username);
 
+        // check if the new password matches the pattern
         if (!checkPassword(newPassword)) {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Invalid new password"));
         }
+        // check if the username exists
         if (user_password == null) {
             return gson.toJson(Map.of("response", 102, "errorMessage", "Non-existent username"));
         }
-
+        // check if the old password matches the stored password
         if (!user_password.equals(hashPassword(oldPassword))) {
             return gson.toJson(Map.of("response", 102, "errorMessage", "Username/old password mismatch"));
         }
-
+        // check if the new password is equal to the old password
         if (newPassword.equals(oldPassword)) {
             return gson.toJson(Map.of("response", 103, "errorMessage", "New password equal to the old one"));
         }
@@ -581,11 +663,14 @@ public class CrossServerMain {
     }
 
     /*
-     * User login the method returns a map containing the response code, the error message and
-     * the maximum user session which will be forwarded to the client, moreover it saves the
-     * username for let the server "UserHandler" to manage the user connection and update the
-     * server when something happends to the user connection. The "UserHandler" will send the
-     * response to the client according to the format in the
+     * User login the method returns a map containing the response code, the error
+     * message and the maximum user session which will be forwarded to the client,
+     * moreover it saves the username for let the server "UserHandler" to manage the
+     * user
+     * connection and update the server when something happends to the user
+     * connection.
+     * The "UserHandler" will send the response to the client according to the
+     * format in the "handleRequest" method
      */
 
     public Map<String, Object> login(JsonObject request, UserHandler activeConnection) {
@@ -629,8 +714,10 @@ public class CrossServerMain {
         return Map.of("userId", username, "session", maxSessionTime, "response", 100, "errorMessage", "OK");
     }
 
-    // Logout
-    // tested and working
+    /*
+     * User logout the method returns a JSON string containing the response code and
+     * the error message to be forwarded to the client
+     */
     public String logout(JsonObject request, UserHandler activeConnection) {
 
         if (!request.has("operation") || !request.has("values")) {
@@ -642,12 +729,6 @@ public class CrossServerMain {
             return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
         }
         String username = values.get("username").getAsString();
-
-        // // Check if the username corresponds to the current active connection
-        // if (!activeConnection.equals(activeUserConnections.get(username))) {
-        // return gson.toJson(Map.of("response", 101, "errorMessage",
-        // "Username/connection mismatch"));
-        // }
 
         // check if the user is already logged in
         if (!sessionManager.isUserLoggedIn(username)) {
@@ -673,14 +754,19 @@ public class CrossServerMain {
         return gson.toJson(Map.of("response", 100, "errorMessage", "OK"));
     }
 
-    // Manage limit order request
+    /*
+     * Handle the client request to add a limit order to the order book and return a
+     * JSON string containing the order ID (or -1 in case of error) to be forwarded
+     * to the client
+     */
     public String handleLimitOrderRequest(JsonObject request, Socket clientSocket) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderId", -1)); // error: missing parameters
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
-        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId") || !values.has("udpPort")) {
+        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId")
+                || !values.has("udpPort")) {
             return gson.toJson(Map.of("orderId", -1)); // error: missing parameters
         }
 
@@ -688,6 +774,7 @@ public class CrossServerMain {
         long size = values.get("size").getAsLong();
         long price = values.get("price").getAsLong();
 
+        // check if the type, size and price are valid
         if ((!type.equals("bid") && !type.equals("ask")) || size <= 0 || price <= 0) {
             return gson.toJson(Map.of("orderId", -1)); // error
         }
@@ -697,6 +784,8 @@ public class CrossServerMain {
 
         LimitOrder order = new LimitOrder(orderIdCounter.getAndIncrement(), type, size, price);
         order.setUserId(userId);
+
+        // get the user's UDP port for notifications
         int udpPort = values.get("udpPort").getAsInt();
 
         // Register the user's UDP port for notifications
@@ -707,7 +796,11 @@ public class CrossServerMain {
         return gson.toJson(Map.of("orderId", order.getOrderId(), "newUserSession", updatedUserSessionTime));
     }
 
-    // Gestione Market Order (placeholder)
+    /*
+     * Handle the client request to add a market order to the order book and return
+     * a JSON string containing the order ID (or -1 in case of error) to be
+     * forwarded to the client
+     */
     public String handleMarketOrderRequest(JsonObject request, Socket clientSocket) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderId", -1)); // error: missing parameters
@@ -740,13 +833,19 @@ public class CrossServerMain {
 
     }
 
+    /*
+     * Handle the client request to add a stop order to the order book and return a
+     * JSON string containing the order ID (or -1 in case of error) to be forwarded
+     * to the client
+     */
     public String handleStopOrderRequest(JsonObject request, Socket clientSocket) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderId", -1)); // error: missing parameters
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
-        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId") || !values.has("udpPort")) {
+        if (!values.has("type") || !values.has("size") || !values.has("price") || !values.has("userId")
+                || !values.has("udpPort")) {
             return gson.toJson(Map.of("orderId", -1)); // Errore
         }
 
@@ -756,7 +855,7 @@ public class CrossServerMain {
         String userId = values.get("userId").getAsString();
 
         if (!type.equals("bid") && !type.equals("ask")) {
-            return gson.toJson(Map.of("orderId", -1)); // Errore
+            return gson.toJson(Map.of("orderId", -1)); // Error
         }
         int udpPort = values.get("udpPort").getAsInt();
 
@@ -772,8 +871,11 @@ public class CrossServerMain {
         return gson.toJson(Map.of("orderId", stopOrder.getOrderId(), "newUserSession", updatedUserSessionTime));
     }
 
-    // Cancellazione ordini (placeholder)
-    // TODO to test
+    /*
+     * Handle the client request to cancel an order and return a JSON string
+     * containing the order ID (or -1 in case of error) to be forwarded to the
+     * client
+     */
     public String cancelOrder(JsonObject request) {
         if (!request.has("operation") || !request.has("values")) {
             return gson.toJson(Map.of("orderId", -1)); // error: missing parameters
@@ -787,21 +889,36 @@ public class CrossServerMain {
         long orderId = values.get("orderId").getAsLong();
 
         Order order = orderBook.getOrder(orderId);
-
+        // check if the order exists
         if (order == null)
             return gson.toJson(Map.of("response", 101, "errorMessage", "Order does not exist"));
-        if (!order.getUserId().equals(userId))
+
+        // get the user id of the order
+        String orderUserId = order.getUserId();
+        // check if the order belongs to the user
+        if (orderUserId == null || !order.getUserId().equals(userId))
             return gson.toJson(Map.of("response", 101, "errorMessage", "Order belongs to different user"));
         if (order.isExecuted())
             return gson.toJson(Map.of("response", 101, "errorMessage", "Order has been executed"));
 
         orderBook.cancelOrder(orderId);
-        return gson.toJson(Map.of("response", 100, "errorMessage", "OK")); // order has been deleted
+
+        long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
+
+        return gson.toJson(Map.of("response", 100, "errorMessage", "OK", "newUserSession", updatedUserSessionTime)); // order
+                                                                                                                     // has
+                                                                                                                     // been
+                                                                                                                     // deleted
     }
 
+    /*
+     * Handle the client request to get the trade history of a specify month and
+     * year and return a JSON string containing the list of fulfilled orders to be
+     * forwarded to the client
+     */
     public String getPriceHistory(JsonObject request) {
         if (!request.has("operation") || !request.has("values")) {
-            return gson.toJson(Map.of("orderId", -1)); // error: missing parameters
+            return gson.toJson(Map.of("response", 101, "errorMessage", "Missing parameters"));
         }
         JsonObject values = request.get("values").getAsJsonObject();
 
@@ -831,12 +948,16 @@ public class CrossServerMain {
         LocalDate endOfMonth = startOfMonth.plusMonths(1).minusDays(1);
         long startOfMonthSeconds = startOfMonth.atStartOfDay().toEpochSecond(java.time.ZoneOffset.UTC);
         long endOfMonthSeconds = endOfMonth.atStartOfDay().toEpochSecond(java.time.ZoneOffset.UTC);
-        ConcurrentSkipListMap<String, TradeHistory> orderHistory = orderBook.getOrderHistory(startOfMonthSeconds, endOfMonthSeconds);
+        // get the trade history of the month
+        ConcurrentSkipListMap<String, TradeHistory> orderHistory = orderBook.getOrderHistory(startOfMonthSeconds,
+                endOfMonthSeconds);
         long updatedUserSessionTime = sessionManager.updateUserActivity(userId); // update user activity
 
-        return gson.toJson(Map.of("newUserSession", updatedUserSessionTime, "month", month, "tradeHistory", orderHistory));
+        return gson
+                .toJson(Map.of("newUserSession", updatedUserSessionTime, "month", month, "tradeHistory", orderHistory));
     }
 
+    // Main
     public static void main(String[] args) {
         try {
             CrossServerMain server = new CrossServerMain();

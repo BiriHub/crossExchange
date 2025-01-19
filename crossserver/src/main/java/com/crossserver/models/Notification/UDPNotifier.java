@@ -8,12 +8,8 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
-
 import com.crossserver.models.Orders.Order;
 import com.google.gson.Gson;
 
@@ -25,7 +21,8 @@ public class UDPNotifier {
     }
 
     public void unregisterUdpClient(String clientId) {
-        clientUdpAddresses.remove(clientId);
+        if (clientUdpAddresses.containsKey(clientId))
+            clientUdpAddresses.remove(clientId);
     }
 
     public void registerUdpClient(String clientId, InetAddress host, int port) {
@@ -35,7 +32,7 @@ public class UDPNotifier {
         }
     }
 
-    public void notifyClient(String clientId, Order order) {
+    public synchronized void notifyClient(String clientId, Order order) {
         InetSocketAddress udpClientAddress = clientUdpAddresses.get(clientId);
         Gson gson = new Gson();
         if (udpClientAddress != null) {

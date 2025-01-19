@@ -1,19 +1,17 @@
 package com.crossserver.models.Orders;
 
+/*
+ * This class represents an order in the order book
+ */
 public abstract class Order {
-    protected final long orderId;
+    protected final long orderId; // Order unique ID
     protected final String type; // Order type: bid or ask
     protected long size; // Order size
     protected String orderType; // Order type: market,limit or stop
-    protected final long price; // Order price: the price at which the order has been closed, for market orders
-                                // it is the price at which the order has been matched and for limit/stop orders
-                                // it is the price at which the order has been closed
     protected long timestamp; // Order timestamp: when the order has been closed
-    // TODO: ask teacher if the order needs also the timestamp when it has been
-    // created
-    private String userId; // User ID
+    protected final long price; // Order price: price at which the order has been closed
+    private String userId; // User ID: user who placed the order
 
-    // Constructor to read the order from the order history teacher format
     public Order(long orderId, String type, long size, long price) {
         this.orderId = orderId;
         this.type = type;
@@ -21,12 +19,16 @@ public abstract class Order {
         this.price = price;
         this.timestamp = 0;
     }
+    // Check if the order has been executed
+    public boolean isExecuted() {
+        return timestamp != 0;
+    }
 
     public String toJsonString() {
         return "{" + "\"orderId\":" + orderId + ",\"type\":\"" + type + "\",\"size\":" + size + ",\"orderType\":\""
                 + orderType + "\",\"price\":" + price + ",\"timestamp\":" + timestamp + "}";
     }
-
+    
     public long getOrderId() {
         return orderId;
     }
@@ -67,8 +69,6 @@ public abstract class Order {
         return orderType;
     }
 
-    public boolean isExecuted() {
-        return timestamp != 0;
-    }
+
 
 }

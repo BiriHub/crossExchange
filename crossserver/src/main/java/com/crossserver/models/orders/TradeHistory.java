@@ -1,21 +1,22 @@
 package com.crossserver.models.Orders;
-/*
- * Represents the trade history of the market for a specific day
- */
 
 import java.util.ArrayList;
 import java.util.List;
+/*
+ * Represents the trade history of the market for a specific day, 
+ * it is used to store the opening, closing, highest and lowest price of the day and the fulfilled orders of the day 
+ */
 
 public class TradeHistory {
     private final int numberOfDay; // number of the day
-
     private long openingPrice; // Opening price of the day
     private long closingPrice; // Closing price of the day
     private long highestPrice; // Highest price of the day
     private long lowestPrice; // Lowest price of the day
     private final ArrayList<Order> fulfilledOrders; // Fulfilled orders of the day
 
-    public TradeHistory(int numberOfDay,long openingPrice, long closingPrice, long highestPrice, long lowestPrice,List<Order> orders){
+    public TradeHistory(int numberOfDay, long openingPrice, long closingPrice, long highestPrice, long lowestPrice,
+            List<Order> orders) {
         this.numberOfDay = numberOfDay;
         this.openingPrice = openingPrice;
         this.closingPrice = closingPrice;
@@ -65,5 +66,4 @@ public class TradeHistory {
         return fulfilledOrders;
     }
 
-    
 }

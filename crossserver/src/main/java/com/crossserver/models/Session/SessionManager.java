@@ -26,7 +26,7 @@ public class SessionManager {
 
     // Remove user session
     public void logoutUser(String username) {
-        if (username!=null && sessionMap.containsKey(username))
+        if (username != null && sessionMap.containsKey(username))
             sessionMap.remove(username);
     }
 
@@ -39,7 +39,6 @@ public class SessionManager {
      * Update user activity
      * Return the current time if user is logged in
      * Return -1 if user is not logged in
-     * 
      */
 
     public long updateUserActivity(String username) {
@@ -53,14 +52,22 @@ public class SessionManager {
     // Monitor user each user session
     private void startSessionMonitor() {
         executor.scheduleAtFixedRate(() -> {
+
+            ConcurrentHashMap<String, Long> copySessionMap;
+            // Create a copy of the session map to avoid concurrent modification exception
+            synchronized (sessionMap) {
+                copySessionMap = new ConcurrentHashMap<>(sessionMap);
+            }
             long currentTime = System.currentTimeMillis();
-            sessionMap.entrySet().removeIf(entry -> {
+            copySessionMap.entrySet().removeIf(entry -> {
                 if (currentTime - entry.getValue() > sessionTimeout) {
-                    System.out.println("[Session user manager] User " + entry.getKey() + " has been removed due to inactivity");
+                    System.out.println(
+                            "[Session user manager] User " + entry.getKey() + " has been removed due to inactivity");
                     return true;
                 }
                 return false;
             });
-        }, 0, 10, TimeUnit.SECONDS); // TODO: TEMPORANEO PER IL TESTING checks every 10 seconds
+
+        }, 0, 60, TimeUnit.SECONDS); // Check every 60 seconds
     }
 }

@@ -25,7 +25,7 @@ public class SessionManager {
     }
 
     // Remove user session
-    public void logoutUser(String username) {
+    public synchronized void logoutUser(String username) {
         if (username != null && sessionMap.containsKey(username))
             sessionMap.remove(username);
     }
@@ -41,7 +41,7 @@ public class SessionManager {
      * Return -1 if user is not logged in
      */
 
-    public long updateUserActivity(String username) {
+    public synchronized long updateUserActivity(String username) {
         long currentTime = System.currentTimeMillis();
         if (!sessionMap.containsKey(username))
             return -1;

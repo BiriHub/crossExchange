@@ -20,12 +20,12 @@ public class UDPNotifier {
         this.clientUdpAddresses = new ConcurrentHashMap<>();
     }
 
-    public void unregisterUdpClient(String clientId) {
+    public synchronized void unregisterUdpClient(String clientId) {
         if (clientUdpAddresses.containsKey(clientId))
             clientUdpAddresses.remove(clientId);
     }
 
-    public void registerUdpClient(String clientId, InetAddress host, int port) {
+    public synchronized void registerUdpClient(String clientId, InetAddress host, int port) {
         if (!clientUdpAddresses.containsKey(clientId)) {
             InetSocketAddress udpAddress = new InetSocketAddress(host, port);
             clientUdpAddresses.put(clientId, udpAddress);
